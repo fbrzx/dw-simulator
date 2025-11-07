@@ -46,6 +46,7 @@ class ExperimentCreateResult:
     success: bool
     errors: Sequence[str] = field(default_factory=tuple)
     metadata: ExperimentMetadata | None = None
+    warnings: Sequence[str] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -126,9 +127,12 @@ class ExperimentService:
         except SqlImportError as exc:
             return ExperimentCreateResult(success=False, errors=[str(exc)])
 
+        # Extract warnings from schema
+        warnings = self._extract_warnings_from_schema(schema)
+
         try:
             metadata = self.persistence.create_experiment(schema)
-            return ExperimentCreateResult(success=True, metadata=metadata)
+            return ExperimentCreateResult(success=True, metadata=metadata, warnings=warnings)
         except ExperimentAlreadyExistsError as exc:
             return ExperimentCreateResult(success=False, errors=[str(exc)])
         except ExperimentMaterializationError as exc:
@@ -266,6 +270,26 @@ class ExperimentService:
         return self.persistence.get_generation_run(run_id)
 
     # Internal helpers -------------------------------------------------
+
+    def _extract_warnings_from_schema(self, schema: ExperimentSchema) -> list[str]:
+        """Extract all warnings from all tables in a schema."""
+        warnings = []
+        for table in schema.tables:
+            if table.warnings:
+                warnings.extend(table.warnings)
+        return warnings
+
+    def get_experiment_warnings(self, experiment_name: str) -> list[str]:
+        """Get warnings for an existing experiment by loading its schema."""
+        metadata = self.persistence.get_experiment_metadata(experiment_name)
+        if metadata is None:
+            return []
+
+        try:
+            schema = ExperimentSchema.model_validate_json(metadata.schema_json)
+            return self._extract_warnings_from_schema(schema)
+        except (ValidationError, ValueError):
+            return []
 
     def _collect_generated_artifact_paths(
         self,
