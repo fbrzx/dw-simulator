@@ -49,13 +49,17 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
             continue
         table_name = _normalize_identifier(table_expr)
         cols, constraints = _extract_columns_and_constraints(schema_node)
-        pk_columns = set(constraints.get("primary_key", []))
-        if len(pk_columns) > 1:
-            raise SqlImportError(
-                f"Composite primary keys are not supported yet (table '{table_name}' columns {sorted(pk_columns)})."
-            )
+        primary_key_columns = _dedupe_preserve_order(constraints.get("primary_key", []))
+        is_composite_pk = len(primary_key_columns) > 1
 
         column_schemas: list[ColumnSchema] = []
+
+        if is_composite_pk:
+            column_schemas.append(
+                ColumnSchema(name="_row_id", data_type=DataType.INT, is_unique=True)
+            )
+
+        pk_lookup = {col.lower() for col in primary_key_columns}
         for column in cols:
             col_name = column["name"]
             column_schemas.append(
@@ -63,8 +67,18 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
                     name=col_name,
                     data_type=column["type"],
                     varchar_length=column.get("varchar_length"),
-                    is_unique=col_name in pk_columns,
+                    is_unique=(not is_composite_pk and col_name.lower() in pk_lookup),
                 )
+            )
+
+        warnings: list[str] = []
+        composite_keys: list[list[str]] | None = None
+        if is_composite_pk:
+            composite_keys = [primary_key_columns]
+            cols_formatted = ", ".join(primary_key_columns)
+            warnings.append(
+                f"Table '{table_name}' has composite primary key ({cols_formatted}). "
+                "A surrogate '_row_id' column was added for uniqueness."
             )
 
         tables.append(
@@ -72,6 +86,8 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
                 name=table_name,
                 target_rows=options.default_target_rows,
                 columns=column_schemas,
+                composite_keys=composite_keys,
+                warnings=warnings,
             )
         )
 
@@ -109,6 +125,18 @@ def _extract_columns_and_constraints(schema_node: exp.Schema) -> tuple[list[dict
             constraints["primary_key"].extend(pk_columns)
 
     return columns, constraints
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        lowered = value.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        ordered.append(value)
+    return ordered
 
 
 def _parse_column_definition(definition: exp.ColumnDef) -> dict:
