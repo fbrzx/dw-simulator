@@ -22,6 +22,8 @@ from dw_simulator.persistence import (
     GenerationAlreadyRunningError,
     GenerationRunMetadata,
     GenerationStatus,
+    QueryExecutionError,
+    QueryResult,
 )
 from dw_simulator.schema import ExperimentSchema, TableSchema, ColumnSchema
 from dw_simulator.service import ExperimentService
@@ -50,6 +52,8 @@ class StubPersistence:
     start_run_exception: Exception | None = None
     complete_run_exception: Exception | None = None
     fail_run_exception: Exception | None = None
+    query_result: QueryResult | None = None
+    query_exception: Exception | None = None
 
     def __post_init__(self) -> None:
         self.recorded_schema: ExperimentSchema | None = None
@@ -57,6 +61,7 @@ class StubPersistence:
         self.next_run_id = 1
         self.runs: dict[int, GenerationRunMetadata] = {}
         self.started_runs: list[tuple[str, str | None, int | None]] = []
+        self.executed_queries: list[str] = []
 
     def create_experiment(self, schema: ExperimentSchema) -> ExperimentMetadata:
         self.recorded_schema = schema
@@ -145,6 +150,14 @@ class StubPersistence:
 
     def list_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
         return [run for run in self.runs.values() if run.experiment_name == experiment_name]
+
+    def execute_query(self, sql: str) -> QueryResult:
+        self.executed_queries.append(sql)
+        if self.query_exception:
+            raise self.query_exception
+        if self.query_result is None:
+            raise RuntimeError("StubPersistence requires query_result when no exception is set.")
+        return self.query_result
 
 
 def valid_payload() -> dict[str, Any]:
@@ -621,3 +634,77 @@ def test_reset_experiment_materialization_error() -> None:
     assert len(result.errors) == 1
     assert "Failed to reset" in result.errors[0]
     assert result.reset_tables == 0
+
+
+def test_execute_query_success() -> None:
+    """Test successful query execution."""
+    query_result = QueryResult(
+        columns=["id", "name"],
+        rows=[(1, "Alice"), (2, "Bob")],
+        row_count=2,
+    )
+    stub_persistence = StubPersistence(query_result=query_result)
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.execute_query("SELECT * FROM test_table")
+    assert result.success is True
+    assert result.result is not None
+    assert result.result.row_count == 2
+    assert result.result.columns == ["id", "name"]
+    assert len(result.result.rows) == 2
+    assert stub_persistence.executed_queries == ["SELECT * FROM test_table"]
+
+
+def test_execute_query_handles_query_execution_error() -> None:
+    """Test query execution handles QueryExecutionError."""
+    stub_persistence = StubPersistence(
+        query_exception=QueryExecutionError("Query execution failed: syntax error near 'WHERE'")
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.execute_query("SELECT * FROM table WHERE")
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "Query execution failed" in result.errors[0]
+
+
+def test_execute_query_handles_unexpected_error() -> None:
+    """Test query execution handles unexpected errors."""
+    stub_persistence = StubPersistence(
+        query_exception=RuntimeError("Unexpected database error")
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.execute_query("SELECT * FROM table")
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "Unexpected error during query execution" in result.errors[0]
+
+
+def test_export_query_results_to_csv() -> None:
+    """Test CSV export functionality (US 3.2 AC 1)."""
+    query_result = QueryResult(
+        columns=["id", "name", "email"],
+        rows=[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")],
+        row_count=2,
+    )
+
+    csv_content = ExperimentService.export_query_results_to_csv(query_result)
+
+    # Verify CSV format (strip to handle different line endings)
+    lines = [line.strip() for line in csv_content.strip().split("\n")]
+    assert len(lines) == 3  # Header + 2 data rows
+    assert lines[0] == "id,name,email"
+    assert lines[1] == "1,Alice,alice@example.com"
+    assert lines[2] == "2,Bob,bob@example.com"
+
+
+def test_save_query_to_file(tmp_path: Path) -> None:
+    """Test saving query to SQL file (US 3.3 AC 1)."""
+    sql_query = "SELECT * FROM customers WHERE age > 18"
+    output_file = tmp_path / "query.sql"
+
+    ExperimentService.save_query_to_file(sql_query, output_file)
+
+    assert output_file.exists()
+    assert output_file.read_text() == sql_query

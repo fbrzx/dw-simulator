@@ -156,6 +156,56 @@ curl -X POST http://localhost:8000/api/experiments/my_experiment/reset
 - The experiment schema and metadata are preserved; only table data is removed
 - After reset, you can regenerate data normally
 
+## Querying Data
+
+Once you've generated data for an experiment, you can query it using standard SQL.
+The simulator provides multiple interfaces for executing queries and exporting results.
+
+### Executing SQL queries
+
+**Query via CLI:**
+```bash
+# Execute a query and view results in the console
+dw-sim query execute "SELECT * FROM my_experiment__customers LIMIT 10"
+
+# Execute a query and export to CSV
+dw-sim query execute "SELECT * FROM my_experiment__customers" --output results.csv
+
+# Join multiple tables
+dw-sim query execute "SELECT c.name, o.amount FROM my_experiment__customers c JOIN my_experiment__orders o ON c.id = o.customer_id"
+```
+
+**Query via API:**
+```bash
+# Execute query and get JSON results
+curl -X POST http://localhost:8000/api/query/execute \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT * FROM my_experiment__customers LIMIT 10", "format": "json"}'
+
+# Execute query and download CSV
+curl -X POST http://localhost:8000/api/query/execute \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT * FROM my_experiment__customers", "format": "csv"}' \
+  --output results.csv
+```
+
+### Saving SQL queries
+
+You can save your SQL queries to `.sql` files for reuse:
+
+**Save via CLI:**
+```bash
+dw-sim query save "SELECT * FROM my_experiment__customers WHERE age > 18" --output query.sql
+```
+
+### Query features
+
+The query interface supports:
+- **Standard SQL operations**: `SELECT`, `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`
+- **Table naming**: Use the format `<experiment_name>__<table_name>` (e.g., `my_experiment__customers`)
+- **Error handling**: Clear error messages for syntax errors or missing tables
+- **Export formats**: JSON (default) or CSV via API; console display or CSV file via CLI
+
 ## Local API + Web UI
 
 - The Python service now ships with a FastAPI control plane (default port `8000`)

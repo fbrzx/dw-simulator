@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from . import __version__
@@ -16,6 +17,7 @@ from .service import (
     ExperimentResetResult,
     ExperimentGenerateResult,
     ExperimentService,
+    QueryExecutionResult,
     SUPPORTED_DIALECTS,
 )
 
@@ -40,6 +42,11 @@ class SqlImportPayload(BaseModel):
     sql: str = Field(..., description="SQL text containing CREATE TABLE statements.")
     dialect: str = Field("redshift", description=f"SQL dialect ({', '.join(SUPPORTED_DIALECTS)}).")
     target_rows: int | None = Field(None, ge=1, description="Default target row count per table.")
+
+
+class QueryExecutePayload(BaseModel):
+    sql: str = Field(..., description="SQL query to execute.")
+    format: str = Field("json", description="Result format: 'json' or 'csv'.")
 
 
 def create_app(service: ExperimentService | None = None) -> FastAPI:
@@ -199,6 +206,33 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             "created_at": result.metadata.created_at.isoformat(),
             "dialect": payload.dialect,
             "warnings": list(result.warnings),
+        }
+
+    @app.post("/api/query/execute", response_model=None)
+    def execute_query(payload: QueryExecutePayload) -> dict[str, Any] | Response:
+        """Execute a SQL query and return results in JSON or CSV format."""
+        result = _service().execute_query(payload.sql)
+
+        if not result.success or not result.result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.errors,
+            )
+
+        # Return CSV format if requested
+        if payload.format.lower() == "csv":
+            csv_content = _service().export_query_results_to_csv(result.result)
+            return Response(
+                content=csv_content,
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=query_results.csv"}
+            )
+
+        # Default: Return JSON format
+        return {
+            "columns": result.result.columns,
+            "rows": [list(row) for row in result.result.rows],
+            "row_count": result.result.row_count,
         }
 
     return app

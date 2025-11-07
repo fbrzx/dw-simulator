@@ -10,6 +10,7 @@ from dw_simulator.persistence import (
     GenerationAlreadyRunningError,
     GenerationRunNotFoundError,
     GenerationStatus,
+    QueryExecutionError,
     normalize_identifier,
 )
 from dw_simulator.schema import ColumnSchema, ExperimentSchema, TableSchema
@@ -404,3 +405,105 @@ def test_reset_experiment_row_count_zero_after_reset(tmp_path: Path) -> None:
         result = conn.execute(text(f'SELECT COUNT(*) FROM "{physical_table}"'))
         count = result.scalar()
         assert count == 0
+
+
+def test_execute_query_returns_results(tmp_path: Path) -> None:
+    """Test that execute_query successfully returns query results (US 3.1 AC 1)."""
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = ExperimentSchema(
+        name="QueryTest",
+        description="Test query execution",
+        tables=[
+            TableSchema(
+                name="customers",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=100),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="customer_id", data_type="INT"),
+                    ColumnSchema(name="amount", data_type="FLOAT"),
+                ],
+            ),
+        ],
+    )
+    persistence.create_experiment(schema)
+
+    # Insert test data
+    customers_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('customers')}"
+    orders_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('orders')}"
+    with persistence.engine.begin() as conn:
+        conn.execute(text(f'INSERT INTO "{customers_table}" (id, name) VALUES (1, \'Alice\'), (2, \'Bob\')'))
+        conn.execute(text(f'INSERT INTO "{orders_table}" (order_id, customer_id, amount) VALUES (100, 1, 50.0), (101, 2, 75.5)'))
+
+    # Test simple SELECT
+    result = persistence.execute_query(f'SELECT * FROM "{customers_table}"')
+    assert result.row_count == 2
+    assert "id" in result.columns
+    assert "name" in result.columns
+    assert len(result.rows) == 2
+
+    # Test JOIN query (AC 1)
+    join_query = f'SELECT c.name, o.amount FROM "{customers_table}" c JOIN "{orders_table}" o ON c.id = o.customer_id'
+    result = persistence.execute_query(join_query)
+    assert result.row_count == 2
+    assert "name" in result.columns
+    assert "amount" in result.columns
+
+
+def test_execute_query_handles_invalid_sql(tmp_path: Path) -> None:
+    """Test that execute_query provides clear error messages for invalid SQL (US 3.1 AC 2)."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Test syntax error
+    with pytest.raises(QueryExecutionError) as exc_info:
+        persistence.execute_query("SELECT * FROM nonexistent_table WHERE")
+
+    assert "Query execution failed" in str(exc_info.value)
+
+
+def test_execute_query_column_headers_match_schema(tmp_path: Path) -> None:
+    """Test that query results have column headers matching schema (US 3.1 AC 3)."""
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Insert test data
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+    with persistence.engine.begin() as conn:
+        conn.execute(
+            text(f'INSERT INTO "{physical_table}" (customer_id, email, signup_date) VALUES (1, \'test@example.com\', \'2024-01-01\')')
+        )
+
+    # Execute query
+    result = persistence.execute_query(f'SELECT * FROM "{physical_table}"')
+
+    # Verify column headers match schema definition
+    expected_columns = {"customer_id", "email", "signup_date"}
+    assert expected_columns <= set(result.columns)
+
+
+def test_execute_query_returns_empty_result_for_empty_table(tmp_path: Path) -> None:
+    """Test that execute_query handles empty tables correctly."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+    result = persistence.execute_query(f'SELECT * FROM "{physical_table}"')
+
+    assert result.row_count == 0
+    assert len(result.rows) == 0
+    assert len(result.columns) > 0  # Columns should still be present
