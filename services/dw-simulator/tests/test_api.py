@@ -158,3 +158,49 @@ def test_list_experiments_with_no_warnings(client: TestClient) -> None:
     assert len(experiments) == 1
     assert "warnings" in experiments[0]
     assert experiments[0]["warnings"] == []
+
+
+def test_reset_experiment_success(client: TestClient) -> None:
+    """Test successful experiment reset via API."""
+    # Create experiment first
+    client.post("/api/experiments", json=sample_schema("ResetTest"))
+
+    # Reset it
+    response = client.post("/api/experiments/ResetTest/reset")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "ResetTest"
+    assert "reset_tables" in body
+    assert body["reset_tables"] >= 0  # Could be 0 or more depending on schema
+
+
+def test_reset_experiment_not_found(client: TestClient) -> None:
+    """Test reset returns 404 when experiment doesn't exist."""
+    response = client.post("/api/experiments/NonExistent/reset")
+    assert response.status_code == 404
+    body = response.json()
+    assert "detail" in body
+    assert any("does not exist" in str(err).lower() for err in body["detail"])
+
+
+def test_reset_experiment_during_generation(client: TestClient) -> None:
+    """Test reset returns 409 when generation is running."""
+    from unittest.mock import patch
+    from dw_simulator.persistence import GenerationAlreadyRunningError
+
+    # Create experiment
+    client.post("/api/experiments", json=sample_schema("GenRunning"))
+
+    # Mock persistence to raise GenerationAlreadyRunningError
+    with patch("dw_simulator.service.ExperimentService.reset_experiment") as mock_reset:
+        from dw_simulator.service import ExperimentResetResult
+        mock_reset.return_value = ExperimentResetResult(
+            success=False,
+            errors=["Cannot reset experiment 'GenRunning' while generation is running."],
+        )
+
+        response = client.post("/api/experiments/GenRunning/reset")
+        assert response.status_code == 409  # Conflict
+        body = response.json()
+        assert "detail" in body
+        assert any("generation is running" in str(err).lower() for err in body["detail"])

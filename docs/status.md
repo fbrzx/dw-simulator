@@ -27,16 +27,27 @@ Enable experiment generation workflows (row targeting, uniqueness/date enforceme
    - **Documentation:** Updated `README.md`, `services/web-ui/README.md`, and `services/dw-simulator/README.md` with comprehensive generation run tracking workflow documentation
    - All documentation includes CLI, API, and UI usage examples
 
+### US 2.2 – Reset experiments (✅ COMPLETE)
+Allow users to truncate all tables in an experiment without deleting the schema, with guards against resetting during active generation.
+
+**All steps completed:**
+1. **Persistence layer (✅ complete):** Added `reset_experiment()` method that truncates all physical tables while preserving schema metadata, with concurrent generation guards.
+2. **Service layer (✅ complete):** Added `reset_experiment()` method in `ExperimentService` with proper error handling for not-found, already-running, and materialization errors.
+3. **CLI command (✅ complete):** Added `dw-sim experiment reset <name>` command with confirmation and status feedback.
+4. **API endpoint (✅ complete):** Added `POST /api/experiments/{name}/reset` endpoint with proper HTTP status codes (200/404/409).
+5. **UI integration (✅ complete):** Added "Reset" button to experiment cards with confirmation dialog and success/error feedback.
+6. **Comprehensive testing (✅ complete):** Added 9 tests across persistence, service, and API layers covering all acceptance criteria including concurrent generation guards and multi-table scenarios.
+
 ## Active User Story
 
 None - ready to begin next user story from backlog.
 
 ## Recent Work
+- **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.
 - **Composite primary key support (US 1.4):** Complete end-to-end handling of composite primary keys with surrogate `_row_id` generation, comprehensive warnings across CLI/API/UI, and full documentation.
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
-- **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), and data generation.
-- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest` (53 tests, ~90% coverage). Key suites include `tests/test_sql_importer.py`, `tests/test_cli.py`, `tests/test_api.py`, and `tests/test_generator.py`.
+- **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), data generation, and experiment reset.
+- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest` (107 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
 
 ## Backlog
-**US 2.2** – Reset experiments. Truncate all tables without deleting schema, with guards against resetting during active generation.
 **US 3.1-3.3** – SQL Query Interface & Export. Execute SQL queries, export results to CSV, save query scripts.

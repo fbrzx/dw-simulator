@@ -427,6 +427,56 @@ class ExperimentPersistence:
             for row in rows
         ]
 
+    def reset_experiment(self, name: str) -> int:
+        """
+        Truncate all tables in an experiment without deleting the schema.
+        Returns the number of tables reset.
+        Raises GenerationAlreadyRunningError if a generation is currently active.
+        """
+        try:
+            with self.engine.begin() as conn:
+                if not self._experiment_exists(conn, name):
+                    raise ExperimentNotFoundError(f"Experiment '{name}' does not exist.")
+
+                # Check for concurrent generation runs (guard against reset during generation)
+                active_run = conn.execute(
+                    select(self._generation_runs.c.id, self._generation_runs.c.started_at).where(
+                        (self._generation_runs.c.experiment_name == name)
+                        & (self._generation_runs.c.status == GenerationStatus.RUNNING.value)
+                    )
+                ).first()
+
+                if active_run:
+                    raise GenerationAlreadyRunningError(
+                        f"Cannot reset experiment '{name}' while generation is running "
+                        f"(started at {active_run.started_at}, run_id={active_run.id}). "
+                        f"Please wait for it to complete or abort it first."
+                    )
+
+                # Get all tables for this experiment
+                table_rows = conn.execute(
+                    select(self._experiment_tables.c.table_name).where(
+                        self._experiment_tables.c.experiment_name == name
+                    )
+                ).all()
+                physical_tables = [
+                    self._physical_table_name(name, row.table_name) for row in table_rows
+                ]
+
+                inspector = inspect(conn)
+                reset_count = 0
+                for table_name in physical_tables:
+                    if inspector.has_table(table_name):
+                        conn.exec_driver_sql(f'DELETE FROM "{table_name}"')
+                        reset_count += 1
+
+        except (ExperimentNotFoundError, GenerationAlreadyRunningError):
+            raise
+        except SQLAlchemyError as exc:
+            raise ExperimentMaterializationError(f"Failed to reset experiment '{name}': {exc}") from exc
+
+        return reset_count
+
     # Internal helpers -----------------------------------------------------------
 
     def _experiment_exists(self, conn: Connection, name: str) -> bool:

@@ -58,6 +58,15 @@ class ExperimentDeleteResult:
     deleted_tables: int = 0
 
 
+@dataclass(frozen=True)
+class ExperimentResetResult:
+    """Outcome for experiment reset attempts."""
+
+    success: bool
+    errors: Sequence[str] = field(default_factory=tuple)
+    reset_tables: int = 0
+
+
 class ExperimentService:
     """Coordinates schema validation with persistence."""
 
@@ -159,6 +168,22 @@ class ExperimentService:
 
         self._delete_generated_artifacts(artifact_paths, data_root)
         return ExperimentDeleteResult(success=True, deleted_tables=deleted_tables)
+
+    def reset_experiment(self, name: str) -> ExperimentResetResult:
+        """
+        Reset an experiment by truncating all tables without deleting the schema.
+        Guards against resetting while generation is active.
+        """
+        try:
+            reset_tables = self.persistence.reset_experiment(name)
+        except ExperimentNotFoundError as exc:
+            return ExperimentResetResult(success=False, errors=[str(exc)])
+        except GenerationAlreadyRunningError as exc:
+            return ExperimentResetResult(success=False, errors=[str(exc)])
+        except ExperimentMaterializationError as exc:
+            return ExperimentResetResult(success=False, errors=[str(exc)])
+
+        return ExperimentResetResult(success=True, reset_tables=reset_tables)
 
     def generate_data(
         self,
@@ -369,6 +394,7 @@ __all__ = [
     "ExperimentService",
     "ExperimentCreateResult",
     "ExperimentDeleteResult",
+    "ExperimentResetResult",
     "ExperimentGenerateResult",
     "SUPPORTED_DIALECTS",
 ]

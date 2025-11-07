@@ -44,6 +44,8 @@ class StubPersistence:
     to_raise: Exception | None = None
     delete_exception: Exception | None = None
     delete_return: int = 0
+    reset_exception: Exception | None = None
+    reset_return: int = 0
     schema: ExperimentSchema | None = None
     start_run_exception: Exception | None = None
     complete_run_exception: Exception | None = None
@@ -71,6 +73,11 @@ class StubPersistence:
         if self.delete_exception:
             raise self.delete_exception
         return self.delete_return
+
+    def reset_experiment(self, name: str) -> int:
+        if self.reset_exception:
+            raise self.reset_exception
+        return self.reset_return
 
     def get_experiment_metadata(self, name: str) -> ExperimentMetadata | None:
         return self.metadata
@@ -538,3 +545,79 @@ def test_get_generation_run_returns_persistence_data() -> None:
     assert fetched_run is not None
     assert fetched_run.id == 1
     assert fetched_run.experiment_name == "ServiceExperiment"
+
+
+def test_reset_experiment_success() -> None:
+    """Test successful experiment reset."""
+    stub_persistence = StubPersistence(
+        metadata=ExperimentMetadata(
+            name="TestExperiment",
+            description="Test",
+            schema_json="{}",
+            created_at=datetime.now(timezone.utc),
+        ),
+        reset_return=2,
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.reset_experiment("TestExperiment")
+    assert result.success is True
+    assert result.reset_tables == 2
+    assert not result.errors
+
+
+def test_reset_experiment_not_found() -> None:
+    """Test reset returns error when experiment doesn't exist."""
+    stub_persistence = StubPersistence(
+        metadata=None,
+        reset_exception=ExperimentNotFoundError("Experiment 'Unknown' does not exist."),
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.reset_experiment("Unknown")
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "does not exist" in result.errors[0]
+    assert result.reset_tables == 0
+
+
+def test_reset_experiment_during_active_generation() -> None:
+    """Test reset returns error when generation is running."""
+    stub_persistence = StubPersistence(
+        metadata=ExperimentMetadata(
+            name="TestExperiment",
+            description="Test",
+            schema_json="{}",
+            created_at=datetime.now(timezone.utc),
+        ),
+        reset_exception=GenerationAlreadyRunningError(
+            "Cannot reset experiment 'TestExperiment' while generation is running."
+        ),
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.reset_experiment("TestExperiment")
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "generation is running" in result.errors[0]
+    assert result.reset_tables == 0
+
+
+def test_reset_experiment_materialization_error() -> None:
+    """Test reset handles materialization errors."""
+    stub_persistence = StubPersistence(
+        metadata=ExperimentMetadata(
+            name="TestExperiment",
+            description="Test",
+            schema_json="{}",
+            created_at=datetime.now(timezone.utc),
+        ),
+        reset_exception=ExperimentMaterializationError("Failed to reset experiment."),
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.reset_experiment("TestExperiment")
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "Failed to reset" in result.errors[0]
+    assert result.reset_tables == 0

@@ -127,13 +127,42 @@ Generation runs provide full observability into data creation workflows, making
 it easy to debug failures, reproduce datasets with seeds, and audit generation
 history.
 
+### Resetting experiments
+
+You can reset an experiment to truncate all its tables while keeping the schema intact.
+This is useful when you want to clear the data and regenerate it without recreating the
+experiment from scratch.
+
+**Reset via CLI:**
+```bash
+dw-sim experiment reset my_experiment
+# Output: Experiment 'my_experiment' reset (truncated 3 tables).
+```
+
+**Reset via API:**
+```bash
+curl -X POST http://localhost:8000/api/experiments/my_experiment/reset
+# Response: {"name": "my_experiment", "reset_tables": 3}
+```
+
+**Reset via Web UI:**
+1. Open http://localhost:4173
+2. Click "Reset" next to any experiment
+3. Confirm the action in the dialog
+4. The experiment's tables are truncated, and row counts return to 0
+
+**Important notes:**
+- Reset is **blocked** if a generation run is currently active for the experiment
+- The experiment schema and metadata are preserved; only table data is removed
+- After reset, you can regenerate data normally
+
 ## Local API + Web UI
 
 - The Python service now ships with a FastAPI control plane (default port `8000`)
   exposing `GET/POST/DELETE /api/experiments`, `POST /api/experiments/{name}/generate`,
-  and `POST /api/experiments/import-sql`.
+  `POST /api/experiments/{name}/reset`, and `POST /api/experiments/import-sql`.
 - Run it locally via `dw-sim api --host 0.0.0.0 --port 8000` (or `docker compose up
   synthetic-data-generator`).
 - `services/web-ui` contains a static UI (served via Docker Compose or
-  `python -m http.server 4173`) that lets you list/create/delete experiments,
+  `python -m http.server 4173`) that lets you list/create/delete/reset experiments,
   paste JSON schemas, or import SQL DDL for Redshift/Snowflake.
