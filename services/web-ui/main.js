@@ -8,6 +8,7 @@ const sqlInput = document.getElementById('sql-input');
 const sqlNameInput = document.getElementById('sql-experiment-name');
 const dialectSelect = document.getElementById('dialect-select');
 const modeTabs = document.querySelectorAll('.mode-tab');
+const warningBanner = document.getElementById('warning-banner');
 
 const setStatus = (message, type = 'info') => {
   if (!statusEl) return;
@@ -15,7 +16,46 @@ const setStatus = (message, type = 'info') => {
   statusEl.className = type;
 };
 
+const renderWarningBanner = (warnings) => {
+  if (!warningBanner) return;
+
+  warningBanner.innerHTML = '';
+
+  if (!warnings || warnings.length === 0) {
+    warningBanner.classList.add('hidden');
+    return;
+  }
+
+  warningBanner.classList.remove('hidden');
+
+  const icon = document.createElement('span');
+  icon.className = 'warning-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '⚠️';
+
+  const content = document.createElement('div');
+  const heading = document.createElement('strong');
+  heading.textContent = warnings.length === 1 ? 'Warning' : 'Warnings';
+  content.appendChild(heading);
+
+  const list = document.createElement('ul');
+  warnings.forEach((warning) => {
+    const item = document.createElement('li');
+    item.textContent = warning;
+    list.appendChild(item);
+  });
+  content.appendChild(list);
+
+  warningBanner.appendChild(icon);
+  warningBanner.appendChild(content);
+};
+
+const clearWarningBanner = () => {
+  renderWarningBanner([]);
+};
+
 let activeMode = 'json';
+let warningListCounter = 0;
 
 const switchMode = (mode) => {
   activeMode = mode;
@@ -39,8 +79,9 @@ const fetchExperiments = async () => {
     const response = await fetch(`${API_BASE}/experiments`);
     if (!response.ok) throw new Error('Failed to load experiments');
     const data = await response.json();
-    renderExperiments(data.experiments ?? []);
-    setStatus(`Loaded ${data.experiments.length} experiment(s).`);
+    const experiments = data.experiments ?? [];
+    renderExperiments(experiments);
+    setStatus(`Loaded ${experiments.length} experiment(s).`);
   } catch (error) {
     console.error(error);
     setStatus(error.message, 'error');
@@ -48,6 +89,7 @@ const fetchExperiments = async () => {
 };
 
 const renderExperiments = (experiments) => {
+  warningListCounter = 0;
   experimentListEl.innerHTML = '';
   if (!experiments.length) {
     experimentListEl.innerHTML = '<li>No experiments yet. Create one below.</li>';
@@ -58,9 +100,10 @@ const renderExperiments = (experiments) => {
     const item = document.createElement('li');
     item.className = 'experiment-card';
     item.innerHTML = `
-      <div>
+      <div class="experiment-info">
         <strong>${experiment.name}</strong>
         <small>${experiment.table_count} table(s) · Created ${new Date(experiment.created_at).toLocaleString()}</small>
+        <div class="experiment-warnings-container"></div>
       </div>
       <div class="button-group">
         <button class="secondary view-runs-btn" data-name="${experiment.name}">View Runs</button>
@@ -71,6 +114,49 @@ const renderExperiments = (experiments) => {
     item.querySelector('.view-runs-btn').addEventListener('click', () => openRunsModal(experiment.name));
     item.querySelector('.generate-btn').addEventListener('click', () => openGenerateModal(experiment.name));
     item.querySelector('.danger').addEventListener('click', () => deleteExperiment(experiment.name));
+
+    if (Array.isArray(experiment.warnings) && experiment.warnings.length > 0) {
+      const warningsContainer = item.querySelector('.experiment-warnings-container');
+      if (warningsContainer) {
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'warning-badge';
+        badge.title = experiment.warnings.join('\n');
+
+        const icon = document.createElement('span');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = '⚠️';
+
+        const count = document.createElement('span');
+        const countLabel = experiment.warnings.length === 1 ? 'warning' : 'warnings';
+        count.textContent = `${experiment.warnings.length} ${countLabel}`;
+
+        const list = document.createElement('ul');
+        list.classList.add('warning-list', 'hidden');
+        const listId = `experiment-warning-list-${warningListCounter++}`;
+        list.id = listId;
+
+        experiment.warnings.forEach((warning) => {
+          const warningItem = document.createElement('li');
+          warningItem.textContent = warning;
+          list.appendChild(warningItem);
+        });
+
+        badge.setAttribute('aria-controls', listId);
+        badge.setAttribute('aria-expanded', 'false');
+        badge.appendChild(icon);
+        badge.appendChild(count);
+
+        badge.addEventListener('click', () => {
+          const isHidden = list.classList.toggle('hidden');
+          badge.setAttribute('aria-expanded', String(!isHidden));
+        });
+
+        warningsContainer.appendChild(badge);
+        warningsContainer.appendChild(list);
+      }
+    }
+
     experimentListEl.appendChild(item);
   });
 };
@@ -117,6 +203,7 @@ const importExperimentFromSql = async (event) => {
     return;
   }
 
+  clearWarningBanner();
   setStatus('Importing SQL experiment...');
   try {
     const response = await fetch(`${API_BASE}/experiments/import-sql`, {
@@ -128,11 +215,12 @@ const importExperimentFromSql = async (event) => {
         dialect: dialectSelect.value,
       }),
     });
+    const body = await response.json();
     if (!response.ok) {
-      const errorBody = await response.json();
-      throw new Error((errorBody.detail || []).join(' '));
+      throw new Error((body.detail || []).join(' '));
     }
     sqlInput.value = '';
+    renderWarningBanner(body.warnings ?? []);
     setStatus('Experiment imported!', 'success');
     await fetchExperiments();
   } catch (error) {
