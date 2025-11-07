@@ -60,6 +60,43 @@ The command validates the schema, persists metadata to SQLite (or the configured
 warehouse URL), and creates the physical tables. Errors are surfaced with the
 exact validation message(s).
 
+### Generation runs and tracking
+
+Every data generation operation is tracked as a "generation run" with the following metadata:
+
+- **Status**: RUNNING, COMPLETED, FAILED, or ABORTED
+- **Timestamps**: Start time and completion time
+- **Row counts**: Actual rows generated per table
+- **Seed**: Optional RNG seed for reproducible generation
+- **Errors**: Full traceback if the run failed
+
+**Tracking via CLI:**
+```bash
+# Generation runs are automatically tracked when you run:
+dw-sim experiment generate my_experiment --rows table1=10000 --seed 42
+
+# The CLI displays the run summary on completion
+```
+
+**Tracking via API:**
+```bash
+# List all generation runs for an experiment
+curl http://localhost:8000/api/experiments/my_experiment/runs
+
+# Get details of a specific run
+curl http://localhost:8000/api/experiments/my_experiment/runs/1
+```
+
+**Tracking via Web UI:**
+1. Open http://localhost:4173
+2. Click "View Runs" next to any experiment
+3. The modal displays all runs with real-time status updates (polls every 3 seconds)
+4. Running jobs show in-progress status; completed jobs show duration and row counts
+
+Generation runs provide full observability into data creation workflows, making
+it easy to debug failures, reproduce datasets with seeds, and audit generation
+history.
+
 ## Local API + Web UI
 
 - The Python service now ships with a FastAPI control plane (default port `8000`)
