@@ -48,17 +48,27 @@ Enable users to execute SQL queries against populated experiments and export res
 4. **Comprehensive testing (✅ complete):** Added 9 new tests across persistence, service layers covering all acceptance criteria including query execution, error handling, CSV export, and query saving.
 5. **Documentation (✅ complete):** Updated README.md with comprehensive query examples for CLI and API usage.
 
+### US 4.1 – Data generation rules for columns (✅ COMPLETE)
+Enable users to define data generation rules for columns to produce realistic, constrained synthetic data.
+
+**All steps completed:**
+1. **Schema support (✅ complete):** `ColumnSchema` supports `faker_rule` for VARCHAR columns, `min_value`/`max_value` for numeric columns (INT, FLOAT), and `date_start`/`date_end` for DATE columns with full Pydantic validation.
+2. **Generator implementation (✅ complete):** `ExperimentGenerator` implements Faker rule execution, numeric range enforcement, and date range constraints with guaranteed boundary compliance.
+3. **Comprehensive testing (✅ complete):** Added 4 new test functions (`test_us41_ac1_varchar_faker_rules`, `test_us41_ac2_int_numeric_ranges`, `test_us41_ac2_float_numeric_ranges`, `test_us41_combined_faker_and_ranges`) covering all acceptance criteria with verification that generated values respect constraints.
+4. **User documentation (✅ complete):** Added comprehensive "Data Generation Rules" section to README.md with examples for Faker rules (first_name, email, company, etc.), numeric ranges (min/max for INT/FLOAT), date ranges (date_start/date_end), and a complete e-commerce example combining all features.
+
 ## Active User Story
 
-None - all user stories from Epic E3 complete.
+None - all user stories from Epic E3 and US 4.1 complete.
 
 ## Recent Work
-- **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing (110 tests passing), and documentation.
+- **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
+- **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.
 - **Composite primary key support (US 1.4):** Complete end-to-end handling of composite primary keys with surrogate `_row_id` generation, comprehensive warnings across CLI/API/UI, and full documentation.
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
 - **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), data generation, and experiment reset.
-- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest --ignore=tests/test_integration.py` (110 tests passing, 86% coverage). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
+- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest --ignore=tests/test_integration.py` (114 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
 
 ## Backlog
 All current user stories complete. Ready for next epic or feature requests.

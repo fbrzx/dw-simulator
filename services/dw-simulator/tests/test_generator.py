@@ -180,3 +180,197 @@ def test_generator_surrogate_key_multiple_tables(tmp_path: Path) -> None:
     table_b_data = pq.read_table(result.tables[1].files[0])
     table_b_ids = sorted(table_b_data.column("_row_id").to_pylist())
     assert table_b_ids == list(range(1, 21))
+
+
+# US 4.1 Acceptance Criteria Tests
+
+
+def test_us41_ac1_varchar_faker_rules(tmp_path: Path) -> None:
+    """
+    US 4.1 AC 1: GIVEN a column of type VARCHAR is defined,
+    WHEN the user specifies a 'Faker Rule' (e.g., first_name or email),
+    THEN the generation engine uses that rule for population.
+    """
+    schema = ExperimentSchema(
+        name="faker_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="users",
+                target_rows=50,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="first_name", data_type="VARCHAR", faker_rule="first_name", varchar_length=50),
+                    ColumnSchema(name="last_name", data_type="VARCHAR", faker_rule="last_name", varchar_length=50),
+                    ColumnSchema(name="email", data_type="VARCHAR", faker_rule="email", varchar_length=100),
+                    ColumnSchema(name="company", data_type="VARCHAR", faker_rule="company", varchar_length=100),
+                    ColumnSchema(name="city", data_type="VARCHAR", faker_rule="city", varchar_length=50),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=50)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=42),
+    )
+
+    # Read generated data
+    table = pq.read_table(result.tables[0].files[0])
+
+    # Verify all columns have data
+    assert table.num_rows == 50
+
+    # Verify first_name column contains realistic names (not generic words)
+    first_names = table.column("first_name").to_pylist()
+    assert all(name and len(name) > 0 for name in first_names)
+
+    # Verify last_name column contains realistic names
+    last_names = table.column("last_name").to_pylist()
+    assert all(name and len(name) > 0 for name in last_names)
+
+    # Verify email column contains @ symbols (characteristic of email addresses)
+    emails = table.column("email").to_pylist()
+    assert all("@" in email for email in emails)
+
+    # Verify company column contains data
+    companies = table.column("company").to_pylist()
+    assert all(company and len(company) > 0 for company in companies)
+
+    # Verify city column contains data
+    cities = table.column("city").to_pylist()
+    assert all(city and len(city) > 0 for city in cities)
+
+
+def test_us41_ac2_int_numeric_ranges(tmp_path: Path) -> None:
+    """
+    US 4.1 AC 2: GIVEN a numeric column is defined,
+    WHEN the user specifies a range (min/max),
+    THEN the generated data for that column respects the defined boundaries.
+    Testing with INT data type.
+    """
+    schema = ExperimentSchema(
+        name="int_range_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="measurements",
+                target_rows=100,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="age", data_type="INT", min_value=18, max_value=65),
+                    ColumnSchema(name="score", data_type="INT", min_value=0, max_value=100),
+                    ColumnSchema(name="quantity", data_type="INT", min_value=1, max_value=10),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=123),
+    )
+
+    # Read generated data
+    table = pq.read_table(result.tables[0].files[0])
+    assert table.num_rows == 100
+
+    # Verify age column respects min_value=18, max_value=65
+    ages = table.column("age").to_pylist()
+    assert all(18 <= age <= 65 for age in ages), f"Found age values outside [18, 65]: {[a for a in ages if a < 18 or a > 65]}"
+
+    # Verify score column respects min_value=0, max_value=100
+    scores = table.column("score").to_pylist()
+    assert all(0 <= score <= 100 for score in scores), f"Found score values outside [0, 100]: {[s for s in scores if s < 0 or s > 100]}"
+
+    # Verify quantity column respects min_value=1, max_value=10
+    quantities = table.column("quantity").to_pylist()
+    assert all(1 <= qty <= 10 for qty in quantities), f"Found quantity values outside [1, 10]: {[q for q in quantities if q < 1 or q > 10]}"
+
+
+def test_us41_ac2_float_numeric_ranges(tmp_path: Path) -> None:
+    """
+    US 4.1 AC 2: GIVEN a numeric column is defined,
+    WHEN the user specifies a range (min/max),
+    THEN the generated data for that column respects the defined boundaries.
+    Testing with FLOAT data type.
+    """
+    schema = ExperimentSchema(
+        name="float_range_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="metrics",
+                target_rows=100,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="price", data_type="FLOAT", min_value=9.99, max_value=999.99),
+                    ColumnSchema(name="rating", data_type="FLOAT", min_value=0.0, max_value=5.0),
+                    ColumnSchema(name="percentage", data_type="FLOAT", min_value=0.0, max_value=100.0),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=456),
+    )
+
+    # Read generated data
+    table = pq.read_table(result.tables[0].files[0])
+    assert table.num_rows == 100
+
+    # Verify price column respects min_value=9.99, max_value=999.99
+    prices = table.column("price").to_pylist()
+    assert all(9.99 <= price <= 999.99 for price in prices), f"Found price values outside [9.99, 999.99]: {[p for p in prices if p < 9.99 or p > 999.99]}"
+
+    # Verify rating column respects min_value=0.0, max_value=5.0
+    ratings = table.column("rating").to_pylist()
+    assert all(0.0 <= rating <= 5.0 for rating in ratings), f"Found rating values outside [0.0, 5.0]: {[r for r in ratings if r < 0.0 or r > 5.0]}"
+
+    # Verify percentage column respects min_value=0.0, max_value=100.0
+    percentages = table.column("percentage").to_pylist()
+    assert all(0.0 <= pct <= 100.0 for pct in percentages), f"Found percentage values outside [0.0, 100.0]: {[p for p in percentages if p < 0.0 or p > 100.0]}"
+
+
+def test_us41_combined_faker_and_ranges(tmp_path: Path) -> None:
+    """
+    Test combining Faker rules (AC 1) and numeric ranges (AC 2) in a single table.
+    """
+    schema = ExperimentSchema(
+        name="combined_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="products",
+                target_rows=50,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", faker_rule="company", varchar_length=100),
+                    ColumnSchema(name="price", data_type="FLOAT", min_value=10.0, max_value=1000.0),
+                    ColumnSchema(name="stock", data_type="INT", min_value=0, max_value=100),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=50)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=789),
+    )
+
+    # Read generated data
+    table = pq.read_table(result.tables[0].files[0])
+    assert table.num_rows == 50
+
+    # Verify Faker rule for name
+    names = table.column("name").to_pylist()
+    assert all(name and len(name) > 0 for name in names)
+
+    # Verify numeric ranges
+    prices = table.column("price").to_pylist()
+    assert all(10.0 <= price <= 1000.0 for price in prices)
+
+    stocks = table.column("stock").to_pylist()
+    assert all(0 <= stock <= 100 for stock in stocks)
