@@ -4,11 +4,15 @@ A lightweight, dependency-free control panel to manage DW Simulator experiments.
 
 ## Features
 
-- List experiments exposed by the Python API (`GET /api/experiments`).
-- Create experiments by pasting JSON schemas and sending them to the API.
-- Import Redshift/Snowflake SQL DDL (via `/api/experiments/import-sql`) by
+- **List experiments** exposed by the Python API (`GET /api/experiments`).
+- **Create experiments** by pasting JSON schemas and sending them to the API.
+- **Import SQL DDL** (Redshift/Snowflake) via `/api/experiments/import-sql` by
   pasting scripts and choosing a dialect.
-- Delete experiments and drop their corresponding tables.
+- **Generate synthetic data** for experiments with options to:
+  - Override row counts per table
+  - Set a seed for deterministic generation
+  - View generation results (row counts)
+- **Delete experiments** and drop their corresponding tables.
 
 ## Running locally
 

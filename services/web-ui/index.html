@@ -72,6 +72,29 @@
       </section>
     </main>
 
+    <!-- Generate Data Modal -->
+    <div id="generate-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Generate Synthetic Data</h2>
+          <button class="modal-close" type="button">&times;</button>
+        </div>
+        <form id="generate-form">
+          <p>Experiment: <strong id="generate-experiment-name"></strong></p>
+
+          <div id="table-overrides"></div>
+
+          <label for="seed-input">Seed (optional, for deterministic generation)</label>
+          <input id="seed-input" type="number" placeholder="e.g., 123" />
+
+          <div class="actions">
+            <button type="submit" class="primary">Generate Data</button>
+            <button type="button" class="cancel-btn">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script type="module" src="main.js"></script>
   </body>
 </html>

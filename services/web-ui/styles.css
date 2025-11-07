@@ -157,3 +157,97 @@ pre {
   padding: 1rem;
   overflow-x: auto;
 }
+
+/* Modal styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: var(--panel-bg);
+  border: 1px solid #21262d;
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.modal-header h2 {
+  margin: 0;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--text);
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+}
+
+.table-override {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #0f141b;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+}
+
+.table-override label {
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.table-override small {
+  display: block;
+  color: #8b949e;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Button variants */
+button.primary {
+  background: var(--accent);
+}
+
+button.secondary {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  margin-right: 0.5rem;
+}
+
+button.cancel-btn {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: var(--text);
+}
+
+.button-group {
+  display: flex;
+  gap: 0.5rem;
+}
