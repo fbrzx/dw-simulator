@@ -582,3 +582,254 @@ def test_load_parquet_files_to_table_missing_file(tmp_path: Path) -> None:
         )
 
     assert "Missing Parquet files" in str(exc_info.value)
+
+
+def test_load_generation_run_success(tmp_path: Path) -> None:
+    """Successfully loading a generation run should load all tables and return row counts."""
+    from datetime import date
+    from sqlalchemy import text
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Create output directory structure with parquet files
+    output_dir = tmp_path / "output"
+    table_dir = output_dir / "customers"
+    table_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write two parquet batch files
+    batch1_path = table_dir / "batch-00000.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "customer_id": pa.array([1, 2], type=pa.int64()),
+                "email": pa.array(["alice@example.com", "bob@example.com"]),
+                "signup_date": pa.array([date(2024, 1, 10), date(2024, 2, 5)], type=pa.date32()),
+            }
+        ),
+        batch1_path,
+        compression="snappy",
+    )
+
+    batch2_path = table_dir / "batch-00001.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "customer_id": pa.array([3], type=pa.int64()),
+                "email": pa.array(["charlie@example.com"]),
+                "signup_date": pa.array([date(2024, 3, 15)], type=pa.date32()),
+            }
+        ),
+        batch2_path,
+        compression="snappy",
+    )
+
+    # Start and complete a generation run
+    run_id = persistence.start_generation_run(
+        experiment_name=schema.name,
+        output_path=str(output_dir),
+        seed=12345,
+    )
+    persistence.complete_generation_run(run_id, '{"customers": 3}')
+
+    # Load the generation run
+    row_counts = persistence.load_generation_run(run_id)
+
+    # Verify row counts returned
+    assert row_counts == {"customers": 3}
+
+    # Verify data was loaded into the physical table
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+    with persistence.engine.connect() as conn:
+        rows = conn.execute(
+            text(f'SELECT customer_id, email FROM "{physical_table}" ORDER BY customer_id')
+        ).fetchall()
+
+    assert len(rows) == 3
+    assert rows == [
+        (1, "alice@example.com"),
+        (2, "bob@example.com"),
+        (3, "charlie@example.com"),
+    ]
+
+
+def test_load_generation_run_not_found(tmp_path: Path) -> None:
+    """Loading a non-existent generation run should raise GenerationRunNotFoundError."""
+    persistence = create_persistence(tmp_path)
+
+    with pytest.raises(GenerationRunNotFoundError) as exc_info:
+        persistence.load_generation_run(999)
+
+    assert "Generation run 999 not found" in str(exc_info.value)
+
+
+def test_load_generation_run_not_completed(tmp_path: Path) -> None:
+    """Loading a generation run that is not COMPLETED should raise DataLoadError."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Start a generation run but don't complete it
+    run_id = persistence.start_generation_run(schema.name, output_path="/tmp/out")
+
+    with pytest.raises(DataLoadError) as exc_info:
+        persistence.load_generation_run(run_id)
+
+    assert "status is RUNNING" in str(exc_info.value)
+    assert "expected COMPLETED" in str(exc_info.value)
+
+
+def test_load_generation_run_no_output_path(tmp_path: Path) -> None:
+    """Loading a generation run with no output path should raise DataLoadError."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Start and complete a run without an output path
+    run_id = persistence.start_generation_run(schema.name)
+    persistence.complete_generation_run(run_id, '{"customers": 0}')
+
+    with pytest.raises(DataLoadError) as exc_info:
+        persistence.load_generation_run(run_id)
+
+    assert "no output path recorded" in str(exc_info.value)
+
+
+def test_load_generation_run_missing_output_directory(tmp_path: Path) -> None:
+    """Loading a generation run with missing output directory should raise DataLoadError."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Start and complete a run with a non-existent output path
+    run_id = persistence.start_generation_run(
+        schema.name, output_path="/nonexistent/path"
+    )
+    persistence.complete_generation_run(run_id, '{"customers": 0}')
+
+    with pytest.raises(DataLoadError) as exc_info:
+        persistence.load_generation_run(run_id)
+
+    assert "does not exist" in str(exc_info.value)
+
+
+def test_load_generation_run_missing_parquet_files(tmp_path: Path) -> None:
+    """Loading a generation run with missing parquet files should raise DataLoadError."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Create output directory without parquet files
+    output_dir = tmp_path / "output"
+    table_dir = output_dir / "customers"
+    table_dir.mkdir(parents=True, exist_ok=True)
+
+    # Start and complete a generation run
+    run_id = persistence.start_generation_run(
+        schema.name, output_path=str(output_dir)
+    )
+    persistence.complete_generation_run(run_id, '{"customers": 10}')
+
+    with pytest.raises(DataLoadError) as exc_info:
+        persistence.load_generation_run(run_id)
+
+    assert "No Parquet files found" in str(exc_info.value)
+
+
+def test_load_generation_run_multi_table(tmp_path: Path) -> None:
+    """Loading a generation run with multiple tables should load all tables."""
+    from datetime import date
+    from sqlalchemy import text
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    persistence = create_persistence(tmp_path)
+
+    # Create a schema with two tables
+    schema = ExperimentSchema(
+        name="MultiTable",
+        description="Multi-table test",
+        tables=[
+            TableSchema(
+                name="customers",
+                target_rows=2,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR"),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=3,
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="customer_id", data_type="INT"),
+                ],
+            ),
+        ],
+    )
+    persistence.create_experiment(schema)
+
+    # Create output directory with parquet files for both tables
+    output_dir = tmp_path / "output"
+    customers_dir = output_dir / "customers"
+    orders_dir = output_dir / "orders"
+    customers_dir.mkdir(parents=True, exist_ok=True)
+    orders_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write customers parquet file
+    pq.write_table(
+        pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "name": pa.array(["Alice", "Bob"]),
+            }
+        ),
+        customers_dir / "batch-00000.parquet",
+        compression="snappy",
+    )
+
+    # Write orders parquet file
+    pq.write_table(
+        pa.table(
+            {
+                "order_id": pa.array([100, 101, 102], type=pa.int64()),
+                "customer_id": pa.array([1, 1, 2], type=pa.int64()),
+            }
+        ),
+        orders_dir / "batch-00000.parquet",
+        compression="snappy",
+    )
+
+    # Start and complete a generation run
+    run_id = persistence.start_generation_run(schema.name, output_path=str(output_dir))
+    persistence.complete_generation_run(run_id, '{"customers": 2, "orders": 3}')
+
+    # Load the generation run
+    row_counts = persistence.load_generation_run(run_id)
+
+    # Verify row counts for both tables
+    assert row_counts == {"customers": 2, "orders": 3}
+
+    # Verify customers data
+    customers_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('customers')}"
+    with persistence.engine.connect() as conn:
+        customer_rows = conn.execute(
+            text(f'SELECT id, name FROM "{customers_table}" ORDER BY id')
+        ).fetchall()
+
+    assert len(customer_rows) == 2
+    assert customer_rows == [(1, "Alice"), (2, "Bob")]
+
+    # Verify orders data
+    orders_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('orders')}"
+    with persistence.engine.connect() as conn:
+        order_rows = conn.execute(
+            text(f'SELECT order_id, customer_id FROM "{orders_table}" ORDER BY order_id')
+        ).fetchall()
+
+    assert len(order_rows) == 3
+    assert order_rows == [(100, 1), (101, 1), (102, 2)]
