@@ -23,12 +23,12 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
 
 **Implementation Plan:**
 
-1. **Schema extensions for composite key metadata (pending):**
-   - Extend `TableSchema` with optional `composite_keys: list[list[str]]` field to track original composite PK column names
-   - Add `TableSchema.warnings: list[str]` field to store user-facing guidance messages
-   - Update Pydantic validation and serialization
-   - Add unit tests for schema extensions
-   - **Deliverable:** Updated `schema.py` with composite key metadata support, tests passing
+1. **Schema extensions for composite key metadata (✅ complete):**
+   - Extended `TableSchema` with optional `composite_keys: list[list[str]]` field to track original composite PK column names
+   - Added `TableSchema.warnings: list[str]` field to store user-facing guidance messages
+   - Added Pydantic validation to ensure composite_keys references valid columns and rejects empty groups
+   - Added 8 comprehensive unit tests for schema extensions covering valid cases, invalid cases, and backward compatibility
+   - **Deliverable:** Updated `schema.py` with composite key metadata support (93% coverage), all 90 tests passing
 
 2. **SQL importer updates to accept composite keys (pending):**
    - Remove `SqlImportError` when `len(pk_columns) > 1` in `sql_importer.py:52-56`
@@ -65,7 +65,7 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Document `_row_id` column behavior in user-facing docs
    - **Deliverable:** Comprehensive documentation of composite key feature
 
-**Current Step:** Ready to begin Step 1 (Schema extensions)
+**Current Step:** Step 1 complete (Schema extensions). Ready to begin Step 2 (SQL importer updates)
 
 ## Recent Work
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.

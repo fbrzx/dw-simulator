@@ -90,3 +90,75 @@ def test_schema_validation_success_result() -> None:
     payload = build_sample_experiment()
     result = validate_experiment_payload(payload)
     assert result == SchemaValidationResult(is_valid=True, errors=[])
+
+
+def test_table_schema_with_composite_keys() -> None:
+    """Test that TableSchema accepts valid composite_keys metadata."""
+    payload = build_sample_experiment()
+    payload["tables"][0]["composite_keys"] = [["customer_id", "email"]]
+    schema = parse_experiment_schema(payload)
+    assert schema.tables[0].composite_keys == [["customer_id", "email"]]
+
+
+def test_table_schema_with_multiple_composite_keys() -> None:
+    """Test that TableSchema accepts multiple composite key groups."""
+    payload = build_sample_experiment()
+    payload["tables"][0]["composite_keys"] = [["customer_id", "email"], ["email", "signup_date"]]
+    schema = parse_experiment_schema(payload)
+    assert len(schema.tables[0].composite_keys) == 2
+    assert schema.tables[0].composite_keys[0] == ["customer_id", "email"]
+    assert schema.tables[0].composite_keys[1] == ["email", "signup_date"]
+
+
+def test_table_schema_with_warnings() -> None:
+    """Test that TableSchema accepts and stores warnings."""
+    payload = build_sample_experiment()
+    payload["tables"][0]["warnings"] = [
+        "Table 'customers' has composite primary key (customer_id, email). A surrogate '_row_id' column was added for uniqueness."
+    ]
+    schema = parse_experiment_schema(payload)
+    assert len(schema.tables[0].warnings) == 1
+    assert "surrogate" in schema.tables[0].warnings[0]
+
+
+def test_table_schema_with_composite_keys_and_warnings() -> None:
+    """Test that both composite_keys and warnings can be used together."""
+    payload = build_sample_experiment()
+    payload["tables"][0]["composite_keys"] = [["customer_id", "email"]]
+    payload["tables"][0]["warnings"] = ["Composite key detected."]
+    schema = parse_experiment_schema(payload)
+    assert schema.tables[0].composite_keys == [["customer_id", "email"]]
+    assert schema.tables[0].warnings == ["Composite key detected."]
+
+
+def test_table_schema_composite_keys_invalid_column_reference() -> None:
+    """Test that composite_keys validation rejects unknown column names."""
+    payload = build_sample_experiment()
+    payload["tables"][0]["composite_keys"] = [["customer_id", "nonexistent_column"]]
+    with pytest.raises(ValidationError, match="unknown column"):
+        parse_experiment_schema(payload)
+
+
+def test_table_schema_composite_keys_empty_group() -> None:
+    """Test that empty composite key groups are rejected."""
+    payload = build_sample_experiment()
+    payload["tables"][0]["composite_keys"] = [[]]
+    with pytest.raises(ValidationError, match="empty composite key group"):
+        parse_experiment_schema(payload)
+
+
+def test_table_schema_backward_compatibility() -> None:
+    """Test that schemas without composite_keys and warnings still work."""
+    payload = build_sample_experiment()
+    # Don't include composite_keys or warnings fields
+    schema = parse_experiment_schema(payload)
+    assert schema.tables[0].composite_keys is None
+    assert schema.tables[0].warnings == []
+
+
+def test_table_schema_warnings_default_empty_list() -> None:
+    """Test that warnings defaults to empty list when not provided."""
+    payload = build_sample_experiment()
+    schema = parse_experiment_schema(payload)
+    assert schema.tables[0].warnings == []
+    assert isinstance(schema.tables[0].warnings, list)
