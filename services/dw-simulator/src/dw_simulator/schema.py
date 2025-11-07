@@ -127,6 +127,14 @@ class TableSchema(BaseModel):
     name: str = Field(..., description="Table name.")
     target_rows: int = Field(..., gt=0, description="Desired rows for the generator to create.")
     columns: Sequence[ColumnSchema] = Field(..., min_length=1)
+    composite_keys: list[list[str]] | None = Field(
+        default=None,
+        description="Optional list of composite primary key column groups. Each inner list represents a set of columns forming a composite key."
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="User-facing guidance messages (e.g., surrogate key explanations)."
+    )
 
     @field_validator("name")
     @classmethod
@@ -141,6 +149,19 @@ class TableSchema(BaseModel):
             if lowered in seen:
                 raise ValueError(f"Duplicate column name '{column.name}' detected for table '{self.name}'.")
             seen.add(lowered)
+
+        # Validate composite_keys references
+        if self.composite_keys:
+            column_names = {col.name.lower() for col in self.columns}
+            for key_group in self.composite_keys:
+                if not key_group:
+                    raise ValueError(f"Table '{self.name}' has an empty composite key group.")
+                for col_name in key_group:
+                    if col_name.lower() not in column_names:
+                        raise ValueError(
+                            f"Table '{self.name}' composite key references unknown column '{col_name}'."
+                        )
+
         return self
 
 
