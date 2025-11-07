@@ -25,7 +25,6 @@ from sqlalchemy import (
     create_engine,
     inspect,
     select,
-    text,
 )
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError

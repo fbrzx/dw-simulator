@@ -21,7 +21,7 @@ from dw_simulator.persistence import (
     ExperimentNotFoundError,
 )
 from dw_simulator.schema import ExperimentSchema, TableSchema, ColumnSchema
-from dw_simulator.service import ExperimentGenerateResult, ExperimentService
+from dw_simulator.service import ExperimentService
 
 
 @dataclass
