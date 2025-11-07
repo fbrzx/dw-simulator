@@ -71,6 +71,9 @@
 | | **AC 2:** GIVEN a schema definition is loaded, WHEN the user attempts to create the experiment with invalid SQL keywords as table names, THEN the system displays an error message detailing the naming convention violation. |
 | | **AC 3:** GIVEN an experiment named 'Customers' exists, WHEN the user attempts to create a new experiment with the same name, THEN the system prevents creation and prompts the user to use a unique name. |
 | **US 1.2:** As a user, I want to delete an existing experiment, so that I can remove its schema and all associated data permanently. | **AC 1:** GIVEN an experiment is selected, WHEN I confirm the deletion action, THEN the experiment's definition and all its data are permanently removed from the local system. |
+| **US 1.3:** As a user, I want to import a SQL DDL script (Redshift/Snowflake) so that I can bootstrap experiments from existing warehouse schemas without rewriting JSON. | **AC 1:** GIVEN I provide SQL and select a dialect, WHEN parsing succeeds, THEN the UI shows the interpreted columns/types before saving the experiment. |
+| | **AC 2:** GIVEN the SQL includes unsupported constructs (e.g., composite primary keys, VARIANT columns), THEN the UI highlights the affected tables/columns with actionable guidance. |
+| | **AC 3:** GIVEN parsing fails, WHEN I correct the SQL and resubmit, THEN the UI preserves my input and revalidates without a full page refresh. |
 
 #### Epic: E2: Synthetic Data Generation Engine (P0)
 
