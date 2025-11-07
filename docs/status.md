@@ -54,11 +54,11 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Added 4 comprehensive API integration tests: composite key warnings, single PK (no warnings), list with warnings, list without warnings
    - **Deliverable:** API endpoints communicate composite key warnings, all 61 tests passing (service.py:274-292, api.py:70,187, test_api.py:94-160)
 
-5. **UI updates for warning display (pending):**
-   - After successful SQL import, display warnings in an alert/info box above the status message
-   - In experiment list, add a warning icon/badge for experiments with warnings
-   - On hover/click, show warning details in a tooltip or expanded section
-   - **Deliverable:** UI clearly communicates composite key handling to users
+5. **UI updates for warning display (✅ complete):**
+   - Added a dismissible-style warning banner above the experiment status element to surface import warnings immediately after SQL ingestion (index.html, main.js, styles.css)
+   - Enhanced experiment list cards with a warning badge showing counts, tooltip text, and toggleable details list for composite-key guidance
+   - Styled new warning affordances to match the control panel theme and remain accessible (keyboard focusable, aria-expanded states)
+   - **Deliverable:** UI clearly communicates composite key handling to users with inline alerts and experiment-level warning disclosure
 
 6. **Documentation & examples (pending):**
    - Update `docs/tech-spec.md` to document surrogate key approach for composite PKs
@@ -66,7 +66,7 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Document `_row_id` column behavior in user-facing docs
    - **Deliverable:** Comprehensive documentation of composite key feature
 
-**Current Step:** Steps 1-4 complete. Ready to begin Step 5 (UI updates for warning display)
+**Current Step:** Steps 1-5 complete. Ready to begin Step 6 (Documentation & examples)
 
 ## Recent Work
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
