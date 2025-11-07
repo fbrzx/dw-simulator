@@ -99,6 +99,11 @@ class ExperimentGenerator:
         unique_values: dict[str, set[Any]] = defaultdict(set)
         next_unique_int: dict[str, int] = defaultdict(int)
 
+        # Initialize surrogate key columns (_row_id) to start at 1 instead of 0
+        for column_schema in table_schema.columns:
+            if column_schema.name == "_row_id" and column_schema.is_unique:
+                next_unique_int[column_schema.name] = 1
+
         rows_remaining = target_rows
         batch_index = 0
         while rows_remaining > 0:

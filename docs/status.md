@@ -37,11 +37,12 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Introduced `tests/conftest.py` placeholder to allow pytest execution without optional coverage plugins in constrained environments.
    - **Deliverable:** SQL importer accepts composite keys, generates surrogate columns with warnings, targeted importer suite passing (`PYTHONPATH=src pytest -o addopts="" tests/test_sql_importer.py`).
 
-3. **Generator support for surrogate key columns (pending):**
-   - Update `generator.py` to detect columns named `_row_id` with `is_unique=True`
-   - Generate sequential unique integers (1, 2, 3, ...) for surrogate key columns
-   - Add test: generate data for table with composite PK → verify `_row_id` values are unique and sequential
-   - **Deliverable:** Generator handles surrogate keys correctly, tests passing
+3. **Generator support for surrogate key columns (✅ complete):**
+   - Updated `generator.py` to detect columns named `_row_id` with `is_unique=True`
+   - Implemented sequential unique integer generation (1, 2, 3, ...) for surrogate key columns starting at 1
+   - Added comprehensive tests: `test_generator_surrogate_key_starts_at_one` verifies sequential values 1-100, `test_generator_surrogate_key_multiple_tables` verifies independent sequences per table
+   - Removed obsolete `tests/conftest.py` (pytest-cov properly installed)
+   - **Deliverable:** Generator handles surrogate keys correctly, all 85 tests passing (88% coverage)
 
 4. **API enhancements for warning communication (pending):**
    - Extend `POST /api/experiments/import-sql` response to include `warnings: list[str]` field
@@ -62,7 +63,7 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Document `_row_id` column behavior in user-facing docs
    - **Deliverable:** Comprehensive documentation of composite key feature
 
-**Current Step:** Steps 1-2 complete. Ready to begin Step 3 (Generator support for surrogate key columns)
+**Current Step:** Steps 1-3 complete. Ready to begin Step 4 (API enhancements for warning communication)
 
 ## Recent Work
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
