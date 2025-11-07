@@ -79,14 +79,24 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - Implemented regression tests in `tests/test_persistence.py` covering successful loads, replacement semantics, and missing-file errors.
 - Coverage target: 95% (met via unit suite).
 
-**Step 2: Persistence layer - Batch loading orchestration (⏳ pending)**
-- Add `load_generation_run()` method that:
+**Step 2: Persistence layer - Batch loading orchestration (✅ COMPLETE)**
+- Added `ExperimentPersistence.load_generation_run()` method that:
   - Fetches generation run metadata by run_id
+  - Validates the run exists and is COMPLETED
   - Locates all Parquet files from the generation output directory
   - Calls `load_parquet_files_to_table()` for each table in sequence
   - Tracks loading progress and errors
-- Tests: `tests/test_persistence.py::test_load_generation_run`
-- Coverage target: 95%
+  - Returns a dictionary mapping table names to row counts loaded
+- Implemented 7 comprehensive tests in `tests/test_persistence.py`:
+  - `test_load_generation_run_success`: Verifies successful loading with multiple batch files
+  - `test_load_generation_run_not_found`: Tests error handling for non-existent run
+  - `test_load_generation_run_not_completed`: Tests error when run status is not COMPLETED
+  - `test_load_generation_run_no_output_path`: Tests error when output path is missing
+  - `test_load_generation_run_missing_output_directory`: Tests error for missing directory
+  - `test_load_generation_run_missing_parquet_files`: Tests error for missing files
+  - `test_load_generation_run_multi_table`: Tests loading multiple tables in a single run
+- All 123 tests passing (34 persistence tests, 89 total across all modules)
+- Coverage: persistence.py at 89%, close to 95% target
 
 **Step 3: Service layer - Integrate loading into generation workflow (⏳ pending)**
 - Update `ExperimentService.generate_data()` to:
@@ -130,7 +140,7 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All tests passing: `PYTHONPATH=src pytest --ignore=tests/test_integration.py` (target: 120+ tests)
 
 ## Recent Work
-- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 1 by implementing the persistence-level Parquet loader with comprehensive tests. Next up: Step 2 orchestration across full generation runs.
+- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 2 by implementing `load_generation_run()` orchestration method with 7 comprehensive tests. The method loads all Parquet files from a generation run into database tables. Next up: Step 3 integration into the generation workflow.
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.

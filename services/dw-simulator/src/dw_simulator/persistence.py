@@ -607,6 +607,89 @@ class ExperimentPersistence:
                 f"Failed to load data into '{table_name}' for experiment '{experiment_name}': {exc}"
             ) from exc
 
+    def load_generation_run(self, run_id: int) -> dict[str, int]:
+        """
+        Load all Parquet files from a generation run into their corresponding
+        database tables.
+
+        Returns a dictionary mapping table names to row counts loaded.
+        Raises GenerationRunNotFoundError if the run doesn't exist.
+        Raises DataLoadError if any table loading fails.
+        """
+        # Fetch the generation run metadata
+        run_metadata = self.get_generation_run(run_id)
+        if not run_metadata:
+            raise GenerationRunNotFoundError(f"Generation run {run_id} not found.")
+
+        # Verify the run completed successfully
+        if run_metadata.status != GenerationStatus.COMPLETED:
+            raise DataLoadError(
+                f"Cannot load generation run {run_id}: status is {run_metadata.status.value}, "
+                f"expected {GenerationStatus.COMPLETED.value}."
+            )
+
+        # Verify output path exists
+        if not run_metadata.output_path:
+            raise DataLoadError(
+                f"Generation run {run_id} has no output path recorded."
+            )
+
+        output_dir = Path(run_metadata.output_path)
+        if not output_dir.exists():
+            raise DataLoadError(
+                f"Output directory '{output_dir}' for generation run {run_id} does not exist."
+            )
+
+        # Get experiment metadata to determine which tables to load
+        experiment_metadata = self.get_experiment_metadata(run_metadata.experiment_name)
+        if not experiment_metadata:
+            raise ExperimentNotFoundError(
+                f"Experiment '{run_metadata.experiment_name}' not found."
+            )
+
+        # Parse the experiment schema to get table names
+        from .schema import ExperimentSchema
+        schema = ExperimentSchema.model_validate_json(experiment_metadata.schema_json)
+
+        # Load each table
+        row_counts: dict[str, int] = {}
+        errors: list[str] = []
+
+        for table_schema in schema.tables:
+            table_name = table_schema.name
+            table_dir = output_dir / table_name
+
+            # Check if table directory exists
+            if not table_dir.exists():
+                errors.append(f"Table directory '{table_dir}' not found for table '{table_name}'.")
+                continue
+
+            # Find all parquet files in the table directory
+            parquet_files = sorted(table_dir.glob("batch-*.parquet"))
+            if not parquet_files:
+                errors.append(f"No Parquet files found in '{table_dir}' for table '{table_name}'.")
+                continue
+
+            # Load the parquet files into the table
+            try:
+                loaded_rows = self.load_parquet_files_to_table(
+                    experiment_name=run_metadata.experiment_name,
+                    table_name=table_name,
+                    parquet_files=[str(f) for f in parquet_files],
+                )
+                row_counts[table_name] = loaded_rows
+            except (ExperimentNotFoundError, DataLoadError) as exc:
+                errors.append(f"Failed to load table '{table_name}': {exc}")
+
+        # If there were any errors, raise them
+        if errors:
+            error_msg = "; ".join(errors)
+            raise DataLoadError(
+                f"Failed to load generation run {run_id}: {error_msg}"
+            )
+
+        return row_counts
+
     # Internal helpers -----------------------------------------------------------
 
     def _experiment_exists(self, conn: Connection, name: str) -> bool:
