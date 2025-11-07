@@ -89,3 +89,72 @@ def test_import_sql_endpoint_invalid_dialect(client: TestClient) -> None:
         json={"name": "sql_exp", "sql": "CREATE TABLE demo (id BIGINT);", "dialect": "oracle"},
     )
     assert response.status_code == 400
+
+
+def test_import_sql_with_composite_key_returns_warnings(client: TestClient) -> None:
+    """Test that importing SQL with composite primary keys returns warnings."""
+    sql_payload = {
+        "name": "composite_test",
+        "sql": "CREATE TABLE orders (order_id INT, line_id INT, PRIMARY KEY (order_id, line_id));",
+        "dialect": "redshift",
+        "target_rows": 10,
+    }
+    response = client.post("/api/experiments/import-sql", json=sql_payload)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "composite_test"
+    assert "warnings" in body
+    assert len(body["warnings"]) > 0
+    # Verify warning mentions composite key and surrogate
+    warning_text = " ".join(body["warnings"])
+    assert "composite" in warning_text.lower() or "_row_id" in warning_text
+
+
+def test_import_sql_without_composite_key_has_empty_warnings(client: TestClient) -> None:
+    """Test that importing SQL without composite keys returns empty warnings list."""
+    sql_payload = {
+        "name": "single_pk_test",
+        "sql": "CREATE TABLE users (user_id BIGINT PRIMARY KEY, name VARCHAR(50));",
+        "dialect": "redshift",
+        "target_rows": 5,
+    }
+    response = client.post("/api/experiments/import-sql", json=sql_payload)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "single_pk_test"
+    assert "warnings" in body
+    assert body["warnings"] == []
+
+
+def test_list_experiments_includes_warnings(client: TestClient) -> None:
+    """Test that GET /api/experiments includes warnings for each experiment."""
+    # Create experiment with composite key
+    sql_payload = {
+        "name": "warning_exp",
+        "sql": "CREATE TABLE items (item_id INT, store_id INT, PRIMARY KEY (item_id, store_id));",
+        "dialect": "redshift",
+        "target_rows": 10,
+    }
+    client.post("/api/experiments/import-sql", json=sql_payload)
+
+    # List experiments and verify warnings are included
+    response = client.get("/api/experiments")
+    assert response.status_code == 200
+    experiments = response.json()["experiments"]
+    assert len(experiments) == 1
+    assert "warnings" in experiments[0]
+    assert len(experiments[0]["warnings"]) > 0
+
+
+def test_list_experiments_with_no_warnings(client: TestClient) -> None:
+    """Test that experiments without warnings return empty warnings list."""
+    # Create regular experiment
+    client.post("/api/experiments", json=sample_schema("NoWarningExp"))
+
+    # List experiments and verify empty warnings
+    response = client.get("/api/experiments")
+    assert response.status_code == 200
+    experiments = response.json()["experiments"]
+    assert len(experiments) == 1
+    assert "warnings" in experiments[0]
+    assert experiments[0]["warnings"] == []
