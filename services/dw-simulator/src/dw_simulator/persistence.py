@@ -26,6 +26,7 @@ from sqlalchemy import (
     create_engine,
     inspect,
     select,
+    text,
 )
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -62,6 +63,10 @@ class GenerationRunNotFoundError(RuntimeError):
     """Raised when referencing a non-existent generation run."""
 
 
+class QueryExecutionError(RuntimeError):
+    """Raised when SQL query execution fails."""
+
+
 @dataclass(frozen=True)
 class ExperimentMetadata:
     """Metadata view returned by the repository."""
@@ -85,6 +90,15 @@ class GenerationRunMetadata:
     output_path: str | None
     error_message: str | None
     seed: int | None
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    """Result of a SQL query execution."""
+
+    columns: list[str]
+    rows: list[tuple]
+    row_count: int
 
 
 class ExperimentPersistence:
@@ -477,6 +491,32 @@ class ExperimentPersistence:
 
         return reset_count
 
+    def execute_query(self, sql: str) -> QueryResult:
+        """
+        Execute a SQL query and return the results.
+        Raises QueryExecutionError if the query fails.
+        """
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text(sql))
+
+                # Get column names from keys()
+                columns = list(result.keys())
+
+                # Fetch all rows
+                rows = result.fetchall()
+
+                return QueryResult(
+                    columns=columns,
+                    rows=rows,
+                    row_count=len(rows),
+                )
+        except Exception as exc:
+            # Extract the error message for better user feedback
+            error_msg = str(exc)
+            # For syntax errors, try to provide line/position info if available
+            raise QueryExecutionError(f"Query execution failed: {error_msg}") from exc
+
     # Internal helpers -----------------------------------------------------------
 
     def _experiment_exists(self, conn: Connection, name: str) -> bool:
@@ -540,8 +580,10 @@ __all__ = [
     "ExperimentNotFoundError",
     "GenerationAlreadyRunningError",
     "GenerationRunNotFoundError",
+    "QueryExecutionError",
     "ExperimentMetadata",
     "GenerationRunMetadata",
     "GenerationStatus",
+    "QueryResult",
     "normalize_identifier",
 ]

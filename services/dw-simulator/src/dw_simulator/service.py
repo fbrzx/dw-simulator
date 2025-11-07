@@ -7,6 +7,8 @@ and future API surfaces can reuse consistent business logic.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import shutil
@@ -26,6 +28,8 @@ from .persistence import (
     ExperimentPersistence,
     GenerationAlreadyRunningError,
     GenerationRunMetadata,
+    QueryExecutionError,
+    QueryResult,
 )
 from .schema import ExperimentSchema, parse_experiment_schema, validate_experiment_payload
 from .generator import (
@@ -65,6 +69,15 @@ class ExperimentResetResult:
     success: bool
     errors: Sequence[str] = field(default_factory=tuple)
     reset_tables: int = 0
+
+
+@dataclass(frozen=True)
+class QueryExecutionResult:
+    """Outcome for query execution attempts."""
+
+    success: bool
+    errors: Sequence[str] = field(default_factory=tuple)
+    result: QueryResult | None = None
 
 
 class ExperimentService:
@@ -294,6 +307,47 @@ class ExperimentService:
         """Get metadata for a specific generation run."""
         return self.persistence.get_generation_run(run_id)
 
+    def execute_query(self, sql: str) -> QueryExecutionResult:
+        """
+        Execute a SQL query and return the results.
+        Handles errors and provides user-friendly feedback.
+        """
+        try:
+            result = self.persistence.execute_query(sql)
+            return QueryExecutionResult(success=True, result=result)
+        except QueryExecutionError as exc:
+            return QueryExecutionResult(success=False, errors=[str(exc)])
+        except Exception as exc:
+            return QueryExecutionResult(
+                success=False,
+                errors=[f"Unexpected error during query execution: {exc}"]
+            )
+
+    @staticmethod
+    def export_query_results_to_csv(result: QueryResult) -> str:
+        """
+        Export query results to CSV format.
+        Returns a CSV string that can be written to a file or returned via API.
+        """
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Write header
+        writer.writerow(result.columns)
+
+        # Write data rows
+        for row in result.rows:
+            writer.writerow(row)
+
+        return output.getvalue()
+
+    @staticmethod
+    def save_query_to_file(sql: str, file_path: Path) -> None:
+        """
+        Save SQL query text to a .sql file.
+        """
+        file_path.write_text(sql)
+
     # Internal helpers -------------------------------------------------
 
     def _extract_warnings_from_schema(self, schema: ExperimentSchema) -> list[str]:
@@ -396,5 +450,6 @@ __all__ = [
     "ExperimentDeleteResult",
     "ExperimentResetResult",
     "ExperimentGenerateResult",
+    "QueryExecutionResult",
     "SUPPORTED_DIALECTS",
 ]

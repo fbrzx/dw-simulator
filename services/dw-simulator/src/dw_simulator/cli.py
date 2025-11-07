@@ -23,13 +23,16 @@ from .service import (
     ExperimentDeleteResult,
     ExperimentResetResult,
     ExperimentGenerateResult,
+    QueryExecutionResult,
     ExperimentService,
     SUPPORTED_DIALECTS,
 )
 
 app = typer.Typer(help="DW Simulator utility that powers the synthetic-data-generator service.")
 experiment_app = typer.Typer(help="Manage experiment schemas and lifecycle.")
+query_app = typer.Typer(help="Execute SQL queries and export results.")
 app.add_typer(experiment_app, name="experiment")
+app.add_typer(query_app, name="query")
 
 
 @dataclass(frozen=True)
@@ -190,7 +193,69 @@ def import_sql_command(
     typer.secho(f"Experiment '{name}' created from SQL ({dialect})", fg=typer.colors.GREEN)
 
 
+@query_app.command("execute")
+def execute_query(
+    sql: str = typer.Argument(..., help="SQL query to execute."),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Export results to CSV file."),
+) -> None:
+    """
+    Execute a SQL query against the local warehouse.
+
+    Examples:
+        dw-sim query execute "SELECT * FROM my_experiment__customers LIMIT 10"
+        dw-sim query execute "SELECT * FROM my_experiment__orders" --output results.csv
+    """
+    service = ExperimentService()
+    result = service.execute_query(sql)
+
+    if not result.success or not result.result:
+        _print_query_errors_and_exit(result)
+
+    # Export to CSV if output file specified
+    if output:
+        csv_content = service.export_query_results_to_csv(result.result)
+        output.write_text(csv_content)
+        typer.secho(f"Query results exported to {output} ({result.result.row_count} rows)", fg=typer.colors.GREEN)
+    else:
+        # Print results to console
+        typer.secho(f"Query returned {result.result.row_count} rows:", fg=typer.colors.GREEN)
+
+        # Print column headers
+        if result.result.columns:
+            typer.echo(" | ".join(result.result.columns))
+            typer.echo("-" * (sum(len(col) for col in result.result.columns) + 3 * (len(result.result.columns) - 1)))
+
+        # Print rows (limit to first 50 for console display)
+        for i, row in enumerate(result.result.rows):
+            if i >= 50:
+                typer.echo(f"... ({result.result.row_count - 50} more rows)")
+                break
+            typer.echo(" | ".join(str(val) for val in row))
+
+
+@query_app.command("save")
+def save_query(
+    sql: str = typer.Argument(..., help="SQL query text to save."),
+    output: Path = typer.Option(..., "--output", "-o", help="Output .sql file path."),
+) -> None:
+    """
+    Save a SQL query to a .sql file.
+
+    Examples:
+        dw-sim query save "SELECT * FROM my_experiment__customers" --output query.sql
+    """
+    service = ExperimentService()
+    service.save_query_to_file(sql, output)
+    typer.secho(f"Query saved to {output}", fg=typer.colors.GREEN)
+
+
 def _print_errors_and_exit(result: ExperimentDeleteResult | ExperimentCreateResult | ExperimentResetResult | ExperimentGenerateResult) -> None:
+    for error in result.errors:
+        typer.secho(error, err=True, fg=typer.colors.RED)
+    raise typer.Exit(code=1)
+
+
+def _print_query_errors_and_exit(result: QueryExecutionResult) -> None:
     for error in result.errors:
         typer.secho(error, err=True, fg=typer.colors.RED)
     raise typer.Exit(code=1)
