@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 
 from sqlalchemy import (
     Boolean,
@@ -33,6 +34,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from .config import get_target_db_url
 from .schema import ColumnSchema, DataType, ExperimentSchema
+
+import pyarrow.parquet as pq
 
 
 class GenerationStatus(str, Enum):
@@ -65,6 +68,10 @@ class GenerationRunNotFoundError(RuntimeError):
 
 class QueryExecutionError(RuntimeError):
     """Raised when SQL query execution fails."""
+
+
+class DataLoadError(RuntimeError):
+    """Raised when loading Parquet data into warehouse tables fails."""
 
 
 @dataclass(frozen=True)
@@ -517,6 +524,89 @@ class ExperimentPersistence:
             # For syntax errors, try to provide line/position info if available
             raise QueryExecutionError(f"Query execution failed: {error_msg}") from exc
 
+    def load_parquet_files_to_table(
+        self,
+        experiment_name: str,
+        table_name: str,
+        parquet_files: list[str | Path],
+    ) -> int:
+        """
+        Load Parquet batches into the physical table backing an experiment table.
+
+        Returns the number of rows inserted. Raises DataLoadError for any
+        validation or insertion failure.
+        """
+
+        if not parquet_files:
+            raise DataLoadError("No Parquet files provided for loading.")
+
+        paths = [Path(path) for path in parquet_files]
+        missing_files = [str(path) for path in paths if not path.exists()]
+        if missing_files:
+            raise DataLoadError(
+                "Missing Parquet files: " + ", ".join(sorted(missing_files))
+            )
+
+        try:
+            with self.engine.begin() as conn:
+                if not self._experiment_exists(conn, experiment_name):
+                    raise ExperimentNotFoundError(
+                        f"Experiment '{experiment_name}' does not exist."
+                    )
+
+                table_record = conn.execute(
+                    select(self._experiment_tables.c.table_name).where(
+                        (self._experiment_tables.c.experiment_name == experiment_name)
+                        & (self._experiment_tables.c.table_name == table_name)
+                    )
+                ).first()
+
+                if not table_record:
+                    raise DataLoadError(
+                        f"Table '{table_name}' is not registered under experiment '{experiment_name}'."
+                    )
+
+                physical_table = self._physical_table_name(experiment_name, table_name)
+                inspector = inspect(conn)
+                if not inspector.has_table(physical_table):
+                    raise DataLoadError(
+                        f"Physical table '{physical_table}' does not exist in the warehouse."
+                    )
+
+                target_table = Table(physical_table, MetaData(), autoload_with=conn)
+                # Replace existing contents to mirror the latest Parquet export.
+                conn.execute(target_table.delete())
+
+                total_rows = 0
+                for file_path in paths:
+                    try:
+                        parquet_table = pq.read_table(file_path)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        raise DataLoadError(
+                            f"Failed to read Parquet file '{file_path}': {exc}"
+                        ) from exc
+
+                    if parquet_table.num_rows == 0:
+                        continue
+
+                    records = parquet_table.to_pylist()
+                    try:
+                        conn.execute(target_table.insert(), records)
+                    except SQLAlchemyError as exc:
+                        raise DataLoadError(
+                            f"Failed to load Parquet file '{file_path}' into '{physical_table}': {exc}"
+                        ) from exc
+
+                    total_rows += parquet_table.num_rows
+
+                return total_rows
+        except (ExperimentNotFoundError, DataLoadError):
+            raise
+        except SQLAlchemyError as exc:
+            raise DataLoadError(
+                f"Failed to load data into '{table_name}' for experiment '{experiment_name}': {exc}"
+            ) from exc
+
     # Internal helpers -----------------------------------------------------------
 
     def _experiment_exists(self, conn: Connection, name: str) -> bool:
@@ -581,6 +671,7 @@ __all__ = [
     "GenerationAlreadyRunningError",
     "GenerationRunNotFoundError",
     "QueryExecutionError",
+    "DataLoadError",
     "ExperimentMetadata",
     "GenerationRunMetadata",
     "GenerationStatus",
