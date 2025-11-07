@@ -252,6 +252,11 @@ class ExperimentPersistence:
                         self._experiment_tables.c.experiment_name == name
                     )
                 )
+                conn.execute(
+                    self._generation_runs.delete().where(
+                        self._generation_runs.c.experiment_name == name
+                    )
+                )
                 conn.execute(self._experiments.delete().where(self._experiments.c.name == name))
         except ExperimentNotFoundError:
             raise

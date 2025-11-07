@@ -18,8 +18,15 @@ body {
   min-height: 100vh;
 }
 
+.page-shell {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem 2.5rem;
+}
+
 header {
-  padding: 2rem;
+  padding: 2rem 0 1.5rem;
   border-bottom: 1px solid #21262d;
 }
 
@@ -27,7 +34,9 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1.5rem;
-  padding: 2rem;
+  padding: 0;
+  margin-top: 1.5rem;
+  align-items: flex-start;
 }
 
 .panel {

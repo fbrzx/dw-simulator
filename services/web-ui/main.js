@@ -235,6 +235,8 @@ const generateData = async (event) => {
     return;
   }
 
+  const experimentName = currentExperiment;
+
   // Collect row overrides from inputs
   const rowInputs = tableOverridesEl.querySelectorAll('input[type="number"]');
   const rows = {};
@@ -253,10 +255,10 @@ const generateData = async (event) => {
   }
 
   closeGenerateModal();
-  setStatus(`Generating data for ${currentExperiment}...`);
+  setStatus(`Generating data for ${experimentName}...`);
 
   try {
-    const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(currentExperiment)}/generate`, {
+    const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(experimentName)}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

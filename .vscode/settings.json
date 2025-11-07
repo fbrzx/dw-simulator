@@ -1,0 +1,11 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "name": "Local",
+            "database": "${workspaceFolder:dw-simulator}/data/sqlite/dw_simulator.db"
+        }
+    ],
+    "sqltools.useNodeRuntime": true
+}

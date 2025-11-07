@@ -10,8 +10,9 @@ services:
     environment:
       DW_SIMULATOR_TARGET_DB_URL: "sqlite:////data/sqlite/dw_simulator.db"
       DW_SIMULATOR_STAGE_BUCKET: "s3://local/dw-simulator/staging"
+      DW_SIMULATOR_DATA_ROOT: "/data"
     volumes:
-      - ./data/sqlite:/data/sqlite
+      - ./data:/data
     ports:
       - "8000:8000"
     depends_on:

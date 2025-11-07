@@ -66,6 +66,14 @@ dw-sim experiment generate my_experiment --output-dir /tmp/my-data
 - Enforces date ranges, numeric ranges, and VARCHAR length limits
 - Supports Faker rules for realistic data generation (e.g., `first_name`, `email`)
 
+By default both the SQLite metadata database and generated Parquet files live in the repo-level,
+git-ignored `data/` directory:
+
+- Metadata: `data/sqlite/dw_simulator.db`
+- Generated datasets: `data/generated/<experiment>/<timestamp>/<table>/batch-*.parquet`
+
+Set `DW_SIMULATOR_DATA_ROOT=/custom/data/path` if you want those artifacts somewhere else.
+
 **Generated data guarantees:**
 - Exact row counts match target volumes (US 2.1 AC 1)
 - Unique columns contain zero duplicates (US 2.1 AC 2)
@@ -77,7 +85,7 @@ dw-sim experiment generate my_experiment --output-dir /tmp/my-data
 dw-sim experiment delete my_experiment
 ```
 
-Removes metadata and drops all physical tables for the experiment.
+Removes metadata, generation run history, and drops all physical tables for the experiment. The simulator also wipes any generated Parquet folders under `data/generated/my_experiment` (and other run output directories inside `data/`).
 
 ### FastAPI control plane
 

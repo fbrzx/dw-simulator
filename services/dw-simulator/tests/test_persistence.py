@@ -74,11 +74,14 @@ def test_delete_experiment_drops_tables_and_metadata(tmp_path: Path) -> None:
     persistence = create_persistence(tmp_path)
     schema = build_schema()
     persistence.create_experiment(schema)
+    run_id = persistence.start_generation_run(schema.name, output_path="/tmp/out")
+    persistence.complete_generation_run(run_id, '{"customers": 10}')
 
     dropped = persistence.delete_experiment(schema.name)
     assert dropped == 1
     assert persistence.get_experiment_metadata(schema.name) is None
     assert persistence.list_tables(schema.name) == []
+    assert persistence.list_generation_runs(schema.name) == []
 
 
 def test_delete_experiment_not_found(tmp_path: Path) -> None:

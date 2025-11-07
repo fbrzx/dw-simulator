@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from faker import Faker
 
+from .config import get_data_root
 from .schema import ColumnSchema, DataType, ExperimentSchema, TableSchema
 
 
@@ -60,7 +61,8 @@ class ExperimentGenerator:
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         schema = request.schema
-        output_dir = request.output_root or Path("data/generated") / schema.name / str(int(time.time()))
+        data_root = get_data_root()
+        output_dir = request.output_root or data_root / "generated" / schema.name / str(int(time.time()))
         output_dir.mkdir(parents=True, exist_ok=True)
 
         seed = request.seed if request.seed is not None else random.randrange(0, 10**6)

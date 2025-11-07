@@ -297,6 +297,41 @@ def test_delete_experiment_materialization_error() -> None:
     assert "drop failure" in result.errors[0]
 
 
+def test_delete_experiment_cleans_generated_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment_name = "ServiceExperiment"
+    data_root = tmp_path / "data-root"
+    default_dir = data_root / "generated" / experiment_name
+    custom_dir = data_root / "runs" / "custom-output"
+    default_dir.mkdir(parents=True)
+    custom_dir.mkdir(parents=True)
+    (default_dir / "placeholder.txt").write_text("default")
+    (custom_dir / "placeholder.txt").write_text("custom")
+
+    monkeypatch.setattr("dw_simulator.service.get_data_root", lambda: data_root)
+
+    metadata = build_metadata(experiment_name)
+    stub = StubPersistence(delete_return=1, metadata=metadata)
+    run_metadata = GenerationRunMetadata(
+        id=1,
+        experiment_name=experiment_name,
+        status=GenerationStatus.COMPLETED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        row_counts="{}",
+        output_path=str(custom_dir),
+        error_message=None,
+        seed=42,
+    )
+    stub.runs[run_metadata.id] = run_metadata
+
+    service = ExperimentService(persistence=stub)  # type: ignore[arg-type]
+    result = service.delete_experiment(experiment_name)
+
+    assert result.success is True
+    assert not default_dir.exists()
+    assert not custom_dir.exists()
+
+
 def test_generate_data_success(tmp_path: Path) -> None:
     metadata = build_metadata()
     stub_persistence = StubPersistence(metadata=metadata)

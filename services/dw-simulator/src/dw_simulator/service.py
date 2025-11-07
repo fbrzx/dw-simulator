@@ -8,13 +8,16 @@ and future API surfaces can reuse consistent business logic.
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, Set
 
 from pydantic import ValidationError
 
+from .config import get_data_root
 from .persistence import (
     ExperimentAlreadyExistsError,
     ExperimentMaterializationError,
@@ -32,6 +35,8 @@ from .generator import (
     GenerationError,
 )
 from .sql_importer import import_sql, SqlImportOptions, SqlImportError, DEFAULT_TARGET_ROWS, SUPPORTED_DIALECTS
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -137,13 +142,19 @@ class ExperimentService:
     def delete_experiment(self, name: str) -> ExperimentDeleteResult:
         """Delete metadata + physical tables for the specified experiment."""
 
+        data_root = get_data_root()
+        runs = self.persistence.list_generation_runs(name)
+        artifact_paths = self._collect_generated_artifact_paths(name, runs, data_root)
+
         try:
             deleted_tables = self.persistence.delete_experiment(name)
-            return ExperimentDeleteResult(success=True, deleted_tables=deleted_tables)
         except ExperimentNotFoundError as exc:
             return ExperimentDeleteResult(success=False, errors=[str(exc)])
         except ExperimentMaterializationError as exc:
             return ExperimentDeleteResult(success=False, errors=[str(exc)])
+
+        self._delete_generated_artifacts(artifact_paths, data_root)
+        return ExperimentDeleteResult(success=True, deleted_tables=deleted_tables)
 
     def generate_data(
         self,
@@ -253,6 +264,72 @@ class ExperimentService:
     def get_generation_run(self, run_id: int) -> GenerationRunMetadata | None:
         """Get metadata for a specific generation run."""
         return self.persistence.get_generation_run(run_id)
+
+    # Internal helpers -------------------------------------------------
+
+    def _collect_generated_artifact_paths(
+        self,
+        experiment_name: str,
+        runs: Sequence[GenerationRunMetadata],
+        data_root: Path,
+    ) -> Set[Path]:
+        """Collect filesystem paths that should be pruned when deleting an experiment."""
+
+        paths: Set[Path] = set()
+
+        default_path = data_root / "generated" / experiment_name
+        paths.add(default_path)
+
+        resolved_root = data_root.resolve()
+
+        for run in runs:
+            if not run.output_path:
+                continue
+
+            candidate = Path(run.output_path).expanduser()
+            try:
+                resolved_candidate = candidate.resolve()
+            except FileNotFoundError:
+                resolved_candidate = candidate
+
+            if self._is_within_data_root(resolved_candidate, resolved_root):
+                paths.add(resolved_candidate)
+
+        return paths
+
+    def _delete_generated_artifacts(self, paths: Set[Path], data_root: Path) -> None:
+        """Best-effort deletion of generated Parquet folders."""
+
+        resolved_root = data_root.resolve()
+        for path in paths:
+            try:
+                resolved_path = path.resolve()
+            except FileNotFoundError:
+                resolved_path = path
+
+            if not self._is_within_data_root(resolved_path, resolved_root):
+                logger.warning("Skipping deletion outside data root: %s", resolved_path)
+                continue
+
+            if not resolved_path.exists():
+                continue
+
+            try:
+                shutil.rmtree(resolved_path)
+            except FileNotFoundError:
+                continue
+            except Exception as exc:  # pragma: no cover - safety belt
+                logger.warning("Failed to delete generated data at %s: %s", resolved_path, exc)
+
+    @staticmethod
+    def _is_within_data_root(path: Path, data_root: Path) -> bool:
+        """Return True when the target resides inside the configured data root."""
+
+        try:
+            path.relative_to(data_root)
+            return True
+        except ValueError:
+            return False
 
 
 @dataclass(frozen=True)
