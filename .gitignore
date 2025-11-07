@@ -1,0 +1,19 @@
+# Generic Python artifacts
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+**/.venv/
+.coverage
+**/.coverage
+htmlcov/
+dist/
+build/
+.pytest_cache/
+**/.pytest_cache/
+node_modules/
+**/node_modules/
+services/web-ui/dist/
+data/

@@ -29,6 +29,112 @@ This architecture proposes a comprehensive **Local-First Data Simulation Environ
 
 The entire solution is defined by a single `docker-compose.yml` file for a "single-click" local setup.
 
+#### New: Experiment Deletion & Web UI Control Plane
+
+To satisfy **US 1.2** and accelerate the UI roadmap, the architecture now includes a lightweight HTTP control plane plus a React-based web UI:
+
+1. **Experiment lifecycle service (Python/FastAPI)**  
+   * Lives inside the existing `synthetic-data-generator` container.  
+   * Exposes REST endpoints that wrap the existing `ExperimentService`:
+     * `GET /api/experiments` → list metadata (name, description, table counts).  
+     * `POST /api/experiments` → create a new experiment from JSON payloads.  
+     * `DELETE /api/experiments/{name}` → invoke the new deletion workflow (metadata rows + physical tables).  
+   * The HTTP layer reuses the same SQLAlchemy engine as the CLI and runs under Uvicorn/Gunicorn. Typer continues to serve CLI use cases.
+   * All destructive operations execute inside explicit SQL transactions. Dropping the prefixed physical tables and deleting metadata happen atomically; failures roll back and return structured errors (HTTP 409/500).
+
+2. **Deletion workflow (Persistence updates)**  
+   * The repository gains `delete_experiment(name: str)` which:
+     1. Loads experiment metadata; returns a `NotFound` error if absent.  
+     2. Enumerates the physical tables via the `experiment_tables` tracking table (falling back to inspector lookups) and issues `DROP TABLE IF EXISTS` statements.  
+     3. Deletes metadata rows from `experiment_tables` + `experiments` inside the same transaction.  
+     4. Optionally cleans up staged Parquet prefixes in LocalStack S3 (future enhancement; stub call left in interface for extension).  
+   * The method returns the count of tables dropped so the UI/CLI can confirm the outcome.
+
+3. **Web UI (React/Vite, `services/web-ui`)**  
+   * Runs as a local-only SPA served via Vite development server (or static build).  
+   * Core screens delivered in the first increment:
+     * **Experiment List** – fetches `/api/experiments`, shows create/delete controls.
+     * **Create Experiment form** – accepts JSON schema text area, posts to `/api/experiments`.
+     * **Delete Experiment action** – issues `DELETE /api/experiments/{name}` and refreshes the list.
+   * Future iterations layer in query execution + export once the backend exposes the necessary endpoints.
+   * UI will reuse a small API client module to keep fetch logic isolated and to facilitate unit testing (Vitest + React Testing Library).
+
+4. **Security & Local-only Guarantees**  
+   * The HTTP server binds to `localhost` only, ensuring no external exposure.  
+   * CORS is disabled by default; the UI proxies through Vite's dev server to avoid cross-origin issues during development.  
+   * Authentication is deferred until multi-user support is required; current scope assumes trusted local operator.
+
+This addition keeps the architecture local-first while enabling richer interaction patterns beyond the CLI, and it ensures the deletion workflow is fully accessible via both automation (CLI) and the forthcoming UI.
+
+#### New: Synthetic Data Generation Pipeline (US 2.1)
+
+With experiment authoring/deletion complete, the next increment introduces an opinionated generation pipeline that converts schemas into synthetic Parquet batches staged in LocalStack S3 and loaded into the local warehouses.
+
+1. **Inputs & Configuration**
+   * `ExperimentSchema` remains the source of truth (table definitions, constraints).
+   * Users supply a JSON payload (CLI/API/UI) specifying:
+     * `experiment_name`
+     * Optional per-table overrides for `target_rows` (default: use schema values)
+     * Optional seed for deterministic generation (`--seed` flag / request field)
+   * Generation jobs run under the same container as the CLI/API, ensuring a single codepath whether invoked via `dw-sim experiment generate`, REST, or future scheduler.
+
+2. **Generation Engine (Python module `dw_simulator.generator`)**
+   * Uses Faker for discrete column rules (varchar/email/names) and NumPy/Pandas utilities for numeric/date distributions; SDV integration is deferred until richer statistical requirements arrive.
+   * Each table is processed in batches (default 10k rows) to keep memory bounded. The generator yields Pandas DataFrames that are immediately written to compressed Parquet files in `/tmp/dw-sim/<experiment>/<table>/<batch>.parquet`.
+   * Constraints/enforcements:
+     * `is_unique`: tracked via incremental sets to guarantee no duplicates even across batches.
+     * `required=False`: introduces NULLs at a configurable percentage (default 0%).
+     * `date_start/date_end`, `min_value/max_value`, and `varchar_length` are enforced before serialization.
+   * After each table completes, the parquet files are uploaded to LocalStack S3 (`DW_SIMULATOR_STAGE_BUCKET`) under `s3://.../experiments/<experiment>/<table>/batch-*.parquet`.
+
+3. **Orchestration Flow**
+   1. Service receives generate request → validates experiment exists + not currently running (simple status flag in SQLite).
+   2. Generator produces staged Parquet files while emitting progress events (table-level counts) that are appended to a `generation_runs` table (metadata store).
+   3. Once staging completes, the persistence layer optionally issues `COPY` commands to the local Redshift mock (future step) or simply records the staged object keys so downstream jobs (data-loader service) can ingest them.
+
+4. **API/CLI/UI Surface**
+   * CLI: `dw-sim experiment generate <name> [--rows customers=50000] [--seed 123]`.
+   * API: `POST /api/experiments/{name}/generate` with JSON overrides; responds with a run-id and summary.
+   * UI: Adds a “Generate Data” button per experiment and a modal for specifying row counts/seed; progress is shown via periodic polling of `GET /api/experiments/{name}/runs`.
+
+5. **Failure Handling & Observability**
+   * Jobs execute inside `asyncio` tasks with cancellation hooks so CLI/UI can abort long-running generations.
+   * Errors (e.g., missing Faker provider, disk issues) are captured and returned to the caller with actionable context; metadata tables store `status=FAILED` plus traceback snippet.
+   * A future enhancement will stream stdout to the UI via Server-Sent Events, but initial implementation relies on polling run status.
+
+This design ensures feature parity across CLI/API/UI, keeps generation local-first (no external services), and lays the groundwork for integrating the data-loader service in subsequent stories.
+
+#### Upcoming: SQL-Driven Experiment Import (Redshift & Snowflake)
+
+To reduce friction for analysts who already have DDL files, US 1.3 introduces SQL ingestion and dialect-awareness:
+
+1. **Parser Layer**
+   * Adopt `sqlglot` for multi-dialect parsing (Redshift, Snowflake, ANSI fallback).
+   * Translate `CREATE TABLE` statements into our `ExperimentSchema`:
+     - Map `BIGINT/INTEGER/SMALLINT` → `INT`, `NUMERIC/DECIMAL` → `FLOAT` (with optional `min_value/max_value`), `VARCHAR/NVARCHAR/CHAR` → `VARCHAR` (length inferred), `DATE/TIMESTAMP*` → `DATE` plus optional synthetic time column.
+     - Capture PK/unique constraints; composite keys are flattened into a derived surrogate unique column until multi-column uniqueness is supported natively.
+   * Reject unsupported constructs (e.g., `IDENTITY`, `EXTERNAL TABLE`, `VARIANT`) with actionable errors that include line/column and dialect-specific guidance.
+
+2. **Dialects & Metadata**
+   * Experiments gain a `dialect` field (`redshift`/`snowflake`) stored alongside the schema JSON.
+   * Type mapping tables per dialect so, for example, Snowflake `NUMBER(38,0)` becomes `INT` while Redshift `TIMESTAMPTZ` downgrades to `DATE` + warning.
+
+3. **API/CLI Changes**
+   * New endpoint: `POST /api/experiments/import-sql` accepting `{ sql: "...", dialect: "redshift" }` (or multipart uploads). The server parses → validates → persists via the existing service.
+   * CLI command: `dw-sim experiment import-sql schema.sql --dialect snowflake` producing the normalized JSON (for auditing) before storing it.
+   * The existing `create` endpoints remain for raw JSON to preserve backwards compatibility.
+
+4. **UI Enhancements**
+   * “Create Experiment” modal offers two tabs: **JSON Schema** and **SQL Import**.
+   * SQL tab includes a file picker/text area, dialect dropdown, and inline error reporting sourced from parser diagnostics.
+   * After successful import the UI renders the interpreted column list (data type, lengths, unique flags) so users can confirm the translation before running generation jobs.
+
+5. **Testing & Validation**
+   * Parser unit tests for representative Redshift/Snowflake constructs + failure cases.
+   * Integration tests calling the new API/CLI flows end-to-end, ensuring imported experiments can be created, generated, and deleted like native JSON-defined ones.
+
+By front-loading SQL ingestion and dialect metadata, the simulator stays aligned with real warehouse schemas while keeping the local generator/persistence model simple and portable.
+
 #### A. Component Breakdown (Microservices/Utilities)
 
 | Component | Type | Core Capability | Dependency (Base Image) |

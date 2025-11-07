@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DW Simulator – Experiments</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>DW Simulator Control Panel</h1>
+      <p>Manage experiment schemas locally via the Python API.</p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Experiments</h2>
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
+        <div id="status" role="status" aria-live="polite"></div>
+        <ul id="experiment-list" class="experiment-list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Create Experiment</h2>
+        <div class="mode-tabs">
+          <button type="button" class="mode-tab active" data-mode="json">JSON Schema</button>
+          <button type="button" class="mode-tab" data-mode="sql">SQL Import</button>
+        </div>
+
+        <form id="json-form">
+          <label for="schema-input">Paste experiment JSON schema</label>
+          <textarea id="schema-input" rows="12" required></textarea>
+          <div class="actions">
+            <button type="submit">Create Experiment</button>
+          </div>
+        </form>
+
+        <form id="sql-form" class="hidden">
+          <label for="sql-experiment-name">Experiment name</label>
+          <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
+          <label for="dialect-select">Dialect</label>
+          <select id="dialect-select">
+            <option value="redshift">Amazon Redshift</option>
+            <option value="snowflake">Snowflake</option>
+            <option value="ansi">ANSI</option>
+          </select>
+          <label for="sql-input">Paste SQL (CREATE TABLE ...)</label>
+          <textarea id="sql-input" rows="12" required></textarea>
+          <div class="actions">
+            <button type="submit">Import SQL</button>
+          </div>
+        </form>
+
+        <details>
+          <summary>Sample JSON schema</summary>
+          <pre>{
+  "name": "customers_experiment",
+  "tables": [
+    {
+      "name": "customers",
+      "target_rows": 1000,
+      "columns": [
+        {"name": "customer_id", "data_type": "INT", "is_unique": true},
+        {"name": "email", "data_type": "VARCHAR", "varchar_length": 255}
+      ]
+    }
+  ]
+}</pre>
+        </details>
+      </section>
+    </main>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+.git
+__pycache__/
+*.py[cod]
+.coverage
+.venv/
+htmlcov/
+dist/
+build/
+data/

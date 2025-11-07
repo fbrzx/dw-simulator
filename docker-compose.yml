@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  synthetic-data-generator:
+    build:
+      context: ./services/dw-simulator
+      dockerfile: Dockerfile
+    image: dw-simulator/app:latest
+    command: ["api", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DW_SIMULATOR_TARGET_DB_URL: "sqlite:////data/sqlite/dw_simulator.db"
+      DW_SIMULATOR_STAGE_BUCKET: "s3://local/dw-simulator/staging"
+    volumes:
+      - ./data/sqlite:/data/sqlite
+    ports:
+      - "8000:8000"
+    depends_on:
+      local-s3-staging:
+        condition: service_started
+      local-redshift-mock:
+        condition: service_healthy
+      local-snowflake-emulator:
+        condition: service_started
+    networks:
+      - dw-sim-net
+
+  local-redshift-mock:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: dw_simulator
+      POSTGRES_USER: dw_user
+      POSTGRES_PASSWORD: dw_pass
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "5439:5432"
+    networks:
+      - dw-sim-net
+
+  local-snowflake-emulator:
+    image: localstack/localstack:latest
+    environment:
+      SERVICES: "s3"
+      LS_FEATURE_FLAGS: "snowflake"
+    ports:
+      - "4566:4566"
+    networks:
+      - dw-sim-net
+
+  local-s3-staging:
+    image: localstack/localstack:latest
+    environment:
+      SERVICES: "s3"
+    volumes:
+      - localstack-data:/var/lib/localstack
+    ports:
+      - "4572:4566"
+    networks:
+      - dw-sim-net
+
+  web-ui:
+    image: nginx:alpine
+    volumes:
+      - ./services/web-ui:/usr/share/nginx/html:ro
+    ports:
+      - "4173:80"
+    depends_on:
+      synthetic-data-generator:
+        condition: service_started
+    networks:
+      - dw-sim-net
+
+volumes:
+  postgres-data:
+  localstack-data:
+
+networks:
+  dw-sim-net:
+    name: dw-sim-net
