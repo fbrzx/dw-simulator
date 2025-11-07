@@ -44,12 +44,12 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Removed obsolete `tests/conftest.py` (pytest-cov properly installed)
    - **Deliverable:** Generator handles surrogate keys correctly, all 85 tests passing (88% coverage)
 
-4. **API enhancements for warning communication (pending):**
-   - Extend `POST /api/experiments/import-sql` response to include `warnings: list[str]` field
-   - Include warnings in `GET /api/experiments` response for each experiment (add to experiment summary)
-   - Update `service.py` to extract and propagate warnings from schema metadata
-   - Add API integration tests verifying warning inclusion in responses
-   - **Deliverable:** API endpoints communicate composite key warnings, tests passing
+4. **API enhancements for warning communication (✅ complete):**
+   - Extended `POST /api/experiments/import-sql` response to include `warnings: list[str]` field
+   - Included warnings in `GET /api/experiments` response for each experiment (added to experiment summary)
+   - Updated `service.py` to extract and propagate warnings from schema metadata (`ExperimentCreateResult` now includes warnings field)
+   - Added 4 comprehensive API integration tests verifying warning inclusion in responses
+   - **Deliverable:** API endpoints communicate composite key warnings, all 98 tests passing
 
 5. **UI updates for warning display (pending):**
    - After successful SQL import, display warnings in an alert/info box above the status message
@@ -63,7 +63,7 @@ When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`),
    - Document `_row_id` column behavior in user-facing docs
    - **Deliverable:** Comprehensive documentation of composite key feature
 
-**Current Step:** Steps 1-3 complete. Ready to begin Step 4 (API enhancements for warning communication)
+**Current Step:** Steps 1-4 complete. Ready to begin Step 5 (UI updates for warning display)
 
 ## Recent Work
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.

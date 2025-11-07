@@ -89,3 +89,102 @@ def test_import_sql_endpoint_invalid_dialect(client: TestClient) -> None:
         json={"name": "sql_exp", "sql": "CREATE TABLE demo (id BIGINT);", "dialect": "oracle"},
     )
     assert response.status_code == 400
+
+
+def test_import_sql_endpoint_with_composite_key_includes_warnings(client: TestClient) -> None:
+    """Test that importing SQL with composite primary keys returns warnings in the response."""
+    sql_payload = {
+        "name": "composite_key_exp",
+        "sql": "CREATE TABLE orders (customer_id INT, order_id INT, amount DECIMAL, PRIMARY KEY (customer_id, order_id));",
+        "dialect": "redshift",
+        "target_rows": 5,
+    }
+    response = client.post("/api/experiments/import-sql", json=sql_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "composite_key_exp"
+    assert "warnings" in data
+    assert isinstance(data["warnings"], list)
+    # Should have at least one warning about composite key handling
+    assert len(data["warnings"]) > 0
+    # Verify warning mentions surrogate key
+    warning_text = " ".join(data["warnings"]).lower()
+    assert "composite" in warning_text or "surrogate" in warning_text or "_row_id" in warning_text
+
+
+def test_import_sql_endpoint_without_composite_key_has_empty_warnings(client: TestClient) -> None:
+    """Test that importing SQL without composite keys returns empty warnings."""
+    sql_payload = {
+        "name": "simple_exp",
+        "sql": "CREATE TABLE demo (id BIGINT PRIMARY KEY, name VARCHAR(50));",
+        "dialect": "redshift",
+        "target_rows": 5,
+    }
+    response = client.post("/api/experiments/import-sql", json=sql_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "simple_exp"
+    assert "warnings" in data
+    assert data["warnings"] == []
+
+
+def test_list_experiments_includes_warnings(client: TestClient) -> None:
+    """Test that GET /api/experiments includes warnings for each experiment."""
+    # Create experiment with composite key (should have warnings)
+    sql_payload_with_warnings = {
+        "name": "exp_with_warnings",
+        "sql": "CREATE TABLE multi_key (id1 INT, id2 INT, data VARCHAR(50), PRIMARY KEY (id1, id2));",
+        "dialect": "redshift",
+        "target_rows": 3,
+    }
+    client.post("/api/experiments/import-sql", json=sql_payload_with_warnings)
+
+    # Create experiment without composite key (should have no warnings)
+    sql_payload_no_warnings = {
+        "name": "exp_no_warnings",
+        "sql": "CREATE TABLE simple (id INT PRIMARY KEY, name VARCHAR(50));",
+        "dialect": "redshift",
+        "target_rows": 3,
+    }
+    client.post("/api/experiments/import-sql", json=sql_payload_no_warnings)
+
+    # List experiments and verify warnings are included
+    response = client.get("/api/experiments")
+    assert response.status_code == 200
+    experiments = response.json()["experiments"]
+    assert len(experiments) == 2
+
+    # Find our experiments
+    exp_with_warnings = next(e for e in experiments if e["name"] == "exp_with_warnings")
+    exp_no_warnings = next(e for e in experiments if e["name"] == "exp_no_warnings")
+
+    # Verify warnings field exists and has expected content
+    assert "warnings" in exp_with_warnings
+    assert isinstance(exp_with_warnings["warnings"], list)
+    assert len(exp_with_warnings["warnings"]) > 0
+
+    assert "warnings" in exp_no_warnings
+    assert isinstance(exp_no_warnings["warnings"], list)
+    assert len(exp_no_warnings["warnings"]) == 0
+
+
+def test_import_sql_multi_table_composite_keys_aggregates_warnings(client: TestClient) -> None:
+    """Test that warnings from multiple tables with composite keys are all included."""
+    sql_payload = {
+        "name": "multi_table_exp",
+        "sql": """
+            CREATE TABLE orders (customer_id INT, order_id INT, amount DECIMAL, PRIMARY KEY (customer_id, order_id));
+            CREATE TABLE shipments (order_id INT, shipment_id INT, tracking VARCHAR(50), PRIMARY KEY (order_id, shipment_id));
+        """,
+        "dialect": "redshift",
+        "target_rows": 5,
+    }
+    response = client.post("/api/experiments/import-sql", json=sql_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert "warnings" in data
+    # Should have warnings from both tables
+    assert len(data["warnings"]) >= 2
+    # Each warning should mention the specific table
+    warning_text = " ".join(data["warnings"])
+    assert "orders" in warning_text.lower() or "shipments" in warning_text.lower()

@@ -46,6 +46,7 @@ class ExperimentCreateResult:
     success: bool
     errors: Sequence[str] = field(default_factory=tuple)
     metadata: ExperimentMetadata | None = None
+    warnings: Sequence[str] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -126,9 +127,14 @@ class ExperimentService:
         except SqlImportError as exc:
             return ExperimentCreateResult(success=False, errors=[str(exc)])
 
+        # Extract warnings from all tables in the schema
+        all_warnings = []
+        for table in schema.tables:
+            all_warnings.extend(table.warnings)
+
         try:
             metadata = self.persistence.create_experiment(schema)
-            return ExperimentCreateResult(success=True, metadata=metadata)
+            return ExperimentCreateResult(success=True, metadata=metadata, warnings=all_warnings)
         except ExperimentAlreadyExistsError as exc:
             return ExperimentCreateResult(success=False, errors=[str(exc)])
         except ExperimentMaterializationError as exc:

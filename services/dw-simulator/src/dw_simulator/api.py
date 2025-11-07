@@ -63,10 +63,24 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
 
     @app.get("/api/experiments")
     def list_experiments() -> dict[str, Any]:
+        from .schema import ExperimentSchema
+        from pydantic import ValidationError
+
         experiments = _service().list_experiments()
         summaries = []
         for experiment in experiments:
             table_names = _service().persistence.list_tables(experiment.name)
+
+            # Extract warnings from schema
+            warnings = []
+            try:
+                schema = ExperimentSchema.model_validate_json(experiment.schema_json)
+                for table in schema.tables:
+                    warnings.extend(table.warnings)
+            except (ValidationError, ValueError):
+                # If schema parsing fails, just skip warnings
+                pass
+
             # Include schema for UI to show table details
             summaries.append(
                 {
@@ -75,6 +89,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
                     "created_at": experiment.created_at.isoformat(),
                     "table_count": len(table_names),
                     "schema": experiment.schema_json,
+                    "warnings": warnings,
                 }
             )
         return {"experiments": summaries}
@@ -184,6 +199,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             "name": result.metadata.name,
             "created_at": result.metadata.created_at.isoformat(),
             "dialect": payload.dialect,
+            "warnings": list(result.warnings),
         }
 
     return app
