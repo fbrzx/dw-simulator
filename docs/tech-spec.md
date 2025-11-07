@@ -135,6 +135,82 @@ To reduce friction for analysts who already have DDL files, US 1.3 introduces SQ
 
 By front-loading SQL ingestion and dialect metadata, the simulator stays aligned with real warehouse schemas while keeping the local generator/persistence model simple and portable.
 
+#### Composite Primary Key Handling
+
+Real-world data warehouses frequently employ composite primary keys (e.g., `PRIMARY KEY (region_id, store_id)`). The simulator provides transparent handling and clear user guidance for these schemas:
+
+1. **Surrogate Key Generation**
+   * When the SQL parser detects a composite primary key during import, the system automatically prepends a `_row_id` column to the table definition.
+   * The `_row_id` column has type `INT` with `is_unique=True`, serving as a single-column surrogate primary key for data generation purposes.
+   * Original composite key columns are preserved in the schema and tracked via the `TableSchema.composite_keys` metadata field (e.g., `[["region_id", "store_id"]]`).
+
+2. **Sequential Generation**
+   * During synthetic data generation, the `_row_id` column is populated with sequential integers starting from 1 (1, 2, 3, ..., N).
+   * Each table maintains an independent sequence, ensuring uniqueness within that table.
+   * The original composite key columns are generated normally according to their data types and constraints.
+
+3. **User Communication**
+   * The system emits warnings stored in `TableSchema.warnings` explaining the composite key approach:
+     > "Table 'sales' has a composite primary key (region_id, store_id). A surrogate key column '_row_id' has been added for generation. Original columns are preserved."
+   * Warnings are surfaced through all interfaces:
+     - **CLI**: Printed after successful import
+     - **API**: Included in `POST /api/experiments/import-sql` response under `warnings` field
+     - **UI**: Displayed as dismissible banners immediately after import and as badge/tooltip on experiment cards
+   * The `GET /api/experiments` endpoint includes warnings in experiment summaries for persistent visibility.
+
+4. **Schema Metadata Extensions**
+   * `TableSchema.composite_keys: list[list[str]]` – Stores the original composite primary key column groups
+   * `TableSchema.warnings: list[str]` – Accumulates user-facing guidance messages
+   * Pydantic validation ensures composite key references are valid column names and prevents empty groups
+
+5. **Example: Importing Composite Key SQL**
+
+   **Input DDL (Redshift):**
+   ```sql
+   CREATE TABLE sales (
+     region_id INT NOT NULL,
+     store_id INT NOT NULL,
+     sale_date DATE,
+     amount DECIMAL(10,2),
+     PRIMARY KEY (region_id, store_id)
+   );
+   ```
+
+   **Resulting Schema:**
+   ```json
+   {
+     "name": "sales_experiment",
+     "tables": [
+       {
+         "name": "sales",
+         "target_rows": 1000,
+         "composite_keys": [["region_id", "store_id"]],
+         "warnings": [
+           "Table 'sales' has a composite primary key (region_id, store_id). A surrogate key column '_row_id' has been added for generation. Original columns are preserved."
+         ],
+         "columns": [
+           {"name": "_row_id", "data_type": "INT", "is_unique": true, "required": true},
+           {"name": "region_id", "data_type": "INT", "required": true},
+           {"name": "store_id", "data_type": "INT", "required": true},
+           {"name": "sale_date", "data_type": "DATE"},
+           {"name": "amount", "data_type": "FLOAT"}
+         ]
+       }
+     ]
+   }
+   ```
+
+   **Generated Data Sample:**
+   ```
+   _row_id | region_id | store_id | sale_date  | amount
+   --------|-----------|----------|------------|---------
+   1       | 5         | 101      | 2024-01-15 | 299.99
+   2       | 3         | 102      | 2024-01-16 | 450.00
+   3       | 5         | 103      | 2024-01-17 | 125.50
+   ```
+
+This approach balances practical synthetic data generation (which benefits from single-column unique identifiers) with fidelity to the original schema design, ensuring users understand the transformation and can adapt downstream workflows accordingly.
+
 #### A. Component Breakdown (Microservices/Utilities)
 
 | Component | Type | Core Capability | Dependency (Base Image) |

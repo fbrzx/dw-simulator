@@ -2,6 +2,17 @@
 
 ## Completed User Stories
 
+### US 1.4 – Composite primary key support/guidance (✅ COMPLETE)
+When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`), the simulator generates a surrogate key and clearly explains the approach to users.
+
+**All steps completed:**
+1. **Schema extensions for composite key metadata (✅ complete):** Extended `TableSchema` with `composite_keys` and `warnings` fields, added Pydantic validation, 8 comprehensive unit tests, 93% coverage.
+2. **SQL importer updates (✅ complete):** Updated importer to prepend `_row_id` columns for composite PKs, record original PKs in metadata, and emit user warnings.
+3. **Generator support for surrogate keys (✅ complete):** Implemented sequential unique integer generation (1, 2, 3, ...) for `_row_id` columns, all 85 tests passing.
+4. **API enhancements (✅ complete):** Extended API to communicate warnings through `POST /api/experiments/import-sql` and `GET /api/experiments`, 61 tests passing.
+5. **UI updates (✅ complete):** Added warning banners and experiment card badges to surface composite key handling in the web UI.
+6. **Documentation & examples (✅ complete):** Comprehensive documentation across tech-spec.md, README.md, and service README with CLI/API/UI examples, all 98 tests passing.
+
 ### US 2.1 – Enable experiment generation workflows (✅ COMPLETE)
 Enable experiment generation workflows (row targeting, uniqueness/date enforcement, CLI/API/UI triggers).
 
@@ -18,57 +29,10 @@ Enable experiment generation workflows (row targeting, uniqueness/date enforceme
 
 ## Active User Story
 
-### US 1.4 – Composite primary key support/guidance (🔄 IN PROGRESS)
-When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`), the simulator should generate a surrogate key and clearly explain the approach to users.
-
-**Implementation Plan:**
-
-1. **Schema extensions for composite key metadata (✅ complete):**
-   - Extended `TableSchema` with optional `composite_keys: list[list[str]]` field to track original composite PK column names
-   - Added `TableSchema.warnings: list[str]` field to store user-facing guidance messages
-   - Added Pydantic validation to ensure composite_keys references valid columns and rejects empty groups
-   - Added 8 comprehensive unit tests for schema extensions covering valid cases, invalid cases, and backward compatibility
-   - **Deliverable:** Updated `schema.py` with composite key metadata support (93% coverage), all 90 tests passing
-
-2. **SQL importer updates to accept composite keys (✅ complete):**
-   - Updated importer to prepend surrogate `_row_id` columns for composite primary keys, record original PKs in `composite_keys`, and emit user warnings.
-   - Added `_dedupe_preserve_order` helper to maintain declared key order while avoiding duplicates.
-   - Expanded `test_sql_importer.py` with scenarios covering 2-column, 3-column, and multi-table composite keys; all ensure surrogate handling and metadata/warning propagation.
-   - Introduced `tests/conftest.py` placeholder to allow pytest execution without optional coverage plugins in constrained environments.
-   - **Deliverable:** SQL importer accepts composite keys, generates surrogate columns with warnings, targeted importer suite passing (`PYTHONPATH=src pytest -o addopts="" tests/test_sql_importer.py`).
-
-3. **Generator support for surrogate key columns (✅ complete):**
-   - Updated `generator.py` to detect columns named `_row_id` with `is_unique=True`
-   - Implemented sequential unique integer generation (1, 2, 3, ...) for surrogate key columns starting at 1
-   - Added comprehensive tests: `test_generator_surrogate_key_starts_at_one` verifies sequential values 1-100, `test_generator_surrogate_key_multiple_tables` verifies independent sequences per table
-   - Removed obsolete `tests/conftest.py` (pytest-cov properly installed)
-   - **Deliverable:** Generator handles surrogate keys correctly, all 85 tests passing (88% coverage)
-
-4. **API enhancements for warning communication (✅ complete):**
-   - Extended `ExperimentCreateResult` dataclass with `warnings: Sequence[str]` field
-   - Added `_extract_warnings_from_schema()` helper method to extract warnings from all tables in a schema
-   - Added `get_experiment_warnings()` method to extract warnings from stored experiment metadata
-   - Updated `create_experiment_from_sql()` to collect and return warnings in the result
-   - Extended `POST /api/experiments/import-sql` response to include `warnings` field
-   - Updated `GET /api/experiments` to include `warnings` array for each experiment summary
-   - Added 4 comprehensive API integration tests: composite key warnings, single PK (no warnings), list with warnings, list without warnings
-   - **Deliverable:** API endpoints communicate composite key warnings, all 61 tests passing (service.py:274-292, api.py:70,187, test_api.py:94-160)
-
-5. **UI updates for warning display (✅ complete):**
-   - Added a dismissible-style warning banner above the experiment status element to surface import warnings immediately after SQL ingestion (index.html, main.js, styles.css)
-   - Enhanced experiment list cards with a warning badge showing counts, tooltip text, and toggleable details list for composite-key guidance
-   - Styled new warning affordances to match the control panel theme and remain accessible (keyboard focusable, aria-expanded states)
-   - **Deliverable:** UI clearly communicates composite key handling to users with inline alerts and experiment-level warning disclosure
-
-6. **Documentation & examples (pending):**
-   - Update `docs/tech-spec.md` to document surrogate key approach for composite PKs
-   - Add example SQL with composite key to `README.md` and `services/dw-simulator/README.md`
-   - Document `_row_id` column behavior in user-facing docs
-   - **Deliverable:** Comprehensive documentation of composite key feature
-
-**Current Step:** Steps 1-5 complete. Ready to begin Step 6 (Documentation & examples)
+None - ready to begin next user story from backlog.
 
 ## Recent Work
+- **Composite primary key support (US 1.4):** Complete end-to-end handling of composite primary keys with surrogate `_row_id` generation, comprehensive warnings across CLI/API/UI, and full documentation.
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
 - **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), and data generation.
 - **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest` (53 tests, ~90% coverage). Key suites include `tests/test_sql_importer.py`, `tests/test_cli.py`, `tests/test_api.py`, and `tests/test_generator.py`.
