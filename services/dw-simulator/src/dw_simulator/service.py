@@ -8,6 +8,7 @@ and future API surfaces can reuse consistent business logic.
 from __future__ import annotations
 
 import json
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -20,6 +21,8 @@ from .persistence import (
     ExperimentMetadata,
     ExperimentNotFoundError,
     ExperimentPersistence,
+    GenerationAlreadyRunningError,
+    GenerationRunMetadata,
 )
 from .schema import ExperimentSchema, parse_experiment_schema, validate_experiment_payload
 from .generator import (
@@ -149,15 +152,43 @@ class ExperimentService:
         seed: int | None = None,
         output_dir: Path | None = None,
     ) -> "ExperimentGenerateResult":
+        """
+        Generate synthetic data for an experiment with run tracking and concurrent guards.
+        """
         metadata = self.persistence.get_experiment_metadata(experiment_name)
         if metadata is None:
-            return ExperimentGenerateResult(success=False, errors=[f"Experiment '{experiment_name}' does not exist."])
+            return ExperimentGenerateResult(
+                success=False,
+                errors=[f"Experiment '{experiment_name}' does not exist."]
+            )
 
         try:
             schema = ExperimentSchema.model_validate_json(metadata.schema_json)
         except ValidationError as exc:
-            return ExperimentGenerateResult(success=False, errors=[f"Invalid schema stored for '{experiment_name}': {exc}"])
+            return ExperimentGenerateResult(
+                success=False,
+                errors=[f"Invalid schema stored for '{experiment_name}': {exc}"]
+            )
 
+        # Start generation run with concurrent job guard
+        try:
+            run_id = self.persistence.start_generation_run(
+                experiment_name=experiment_name,
+                output_path=str(output_dir) if output_dir else None,
+                seed=seed,
+            )
+        except GenerationAlreadyRunningError as exc:
+            return ExperimentGenerateResult(
+                success=False,
+                errors=[str(exc)]
+            )
+        except (ExperimentNotFoundError, ExperimentMaterializationError) as exc:
+            return ExperimentGenerateResult(
+                success=False,
+                errors=[f"Failed to start generation run: {exc}"]
+            )
+
+        # Execute generation with error tracking
         try:
             summary = self.generator.generate(
                 GenerationRequest(
@@ -167,9 +198,61 @@ class ExperimentService:
                     seed=seed,
                 )
             )
-            return ExperimentGenerateResult(success=True, summary=summary)
-        except (GenerationError, ValueError) as exc:
-            return ExperimentGenerateResult(success=False, errors=[str(exc)])
+
+            # Build row counts JSON
+            row_counts_dict = {
+                table_result.table_name: table_result.row_count
+                for table_result in summary.tables
+            }
+            row_counts_json = json.dumps(row_counts_dict)
+
+            # Mark run as completed
+            self.persistence.complete_generation_run(run_id, row_counts_json)
+
+            # Fetch the completed run metadata
+            run_metadata = self.persistence.get_generation_run(run_id)
+
+            return ExperimentGenerateResult(
+                success=True,
+                summary=summary,
+                run_metadata=run_metadata,
+            )
+
+        except (GenerationError, ValueError, TypeError) as exc:
+            # Richer error reporting: capture full traceback
+            error_message = f"{type(exc).__name__}: {exc}\n\nTraceback:\n{traceback.format_exc()}"
+            try:
+                self.persistence.fail_generation_run(run_id, error_message)
+            except Exception as persist_exc:
+                # If we can't persist the failure, include it in the error
+                error_message += f"\n\nAdditionally, failed to persist error: {persist_exc}"
+
+            return ExperimentGenerateResult(
+                success=False,
+                errors=[error_message],
+                run_id=run_id,
+            )
+        except Exception as exc:
+            # Catch-all for unexpected errors
+            error_message = f"Unexpected error during generation: {type(exc).__name__}: {exc}\n\nTraceback:\n{traceback.format_exc()}"
+            try:
+                self.persistence.fail_generation_run(run_id, error_message)
+            except Exception:
+                pass  # Best effort
+
+            return ExperimentGenerateResult(
+                success=False,
+                errors=[error_message],
+                run_id=run_id,
+            )
+
+    def list_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
+        """List all generation runs for an experiment."""
+        return self.persistence.list_generation_runs(experiment_name)
+
+    def get_generation_run(self, run_id: int) -> GenerationRunMetadata | None:
+        """Get metadata for a specific generation run."""
+        return self.persistence.get_generation_run(run_id)
 
 
 @dataclass(frozen=True)
@@ -177,6 +260,8 @@ class ExperimentGenerateResult:
     success: bool
     errors: Sequence[str] = field(default_factory=tuple)
     summary: GenerationResult | None = None
+    run_metadata: GenerationRunMetadata | None = None
+    run_id: int | None = None
 
 
 __all__ = [

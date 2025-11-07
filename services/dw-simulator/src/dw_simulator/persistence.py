@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 
 from sqlalchemy import (
     Boolean,
@@ -33,6 +34,14 @@ from .config import get_target_db_url
 from .schema import ColumnSchema, DataType, ExperimentSchema
 
 
+class GenerationStatus(str, Enum):
+    """Status values for generation runs."""
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    ABORTED = "ABORTED"
+
+
 class ExperimentAlreadyExistsError(RuntimeError):
     """Raised when attempting to create an experiment that already exists."""
 
@@ -45,6 +54,14 @@ class ExperimentNotFoundError(RuntimeError):
     """Raised when delete/lookups reference a non-existent experiment."""
 
 
+class GenerationAlreadyRunningError(RuntimeError):
+    """Raised when attempting to start generation while one is already running."""
+
+
+class GenerationRunNotFoundError(RuntimeError):
+    """Raised when referencing a non-existent generation run."""
+
+
 @dataclass(frozen=True)
 class ExperimentMetadata:
     """Metadata view returned by the repository."""
@@ -53,6 +70,21 @@ class ExperimentMetadata:
     description: str | None
     schema_json: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class GenerationRunMetadata:
+    """Metadata for a generation run."""
+
+    id: int
+    experiment_name: str
+    status: GenerationStatus
+    started_at: datetime
+    completed_at: datetime | None
+    row_counts: str  # JSON string
+    output_path: str | None
+    error_message: str | None
+    seed: int | None
 
 
 class ExperimentPersistence:
@@ -79,6 +111,19 @@ class ExperimentPersistence:
             Column("table_name", String(255), nullable=False),
             Column("target_rows", Integer, nullable=False),
             UniqueConstraint("experiment_name", "table_name", name="uq_experiment_table"),
+        )
+        self._generation_runs = Table(
+            "generation_runs",
+            self._metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("experiment_name", String(255), nullable=False),
+            Column("status", String(32), nullable=False),
+            Column("started_at", String(32), nullable=False),
+            Column("completed_at", String(32), nullable=True),
+            Column("row_counts", Text, nullable=True),  # JSON
+            Column("output_path", Text, nullable=True),
+            Column("error_message", Text, nullable=True),
+            Column("seed", Integer, nullable=True),
         )
         self._metadata.create_all(self.engine)
 
@@ -215,6 +260,168 @@ class ExperimentPersistence:
 
         return dropped
 
+    def start_generation_run(
+        self,
+        experiment_name: str,
+        output_path: str | None = None,
+        seed: int | None = None,
+    ) -> int:
+        """
+        Start a new generation run. Returns the run ID.
+        Raises GenerationAlreadyRunningError if a run is already in progress.
+        """
+        try:
+            with self.engine.begin() as conn:
+                # Check if experiment exists
+                if not self._experiment_exists(conn, experiment_name):
+                    raise ExperimentNotFoundError(f"Experiment '{experiment_name}' does not exist.")
+
+                # Check for concurrent runs (concurrent job guard)
+                active_run = conn.execute(
+                    select(self._generation_runs.c.id, self._generation_runs.c.started_at).where(
+                        (self._generation_runs.c.experiment_name == experiment_name)
+                        & (self._generation_runs.c.status == GenerationStatus.RUNNING.value)
+                    )
+                ).first()
+
+                if active_run:
+                    raise GenerationAlreadyRunningError(
+                        f"Generation already running for experiment '{experiment_name}' "
+                        f"(started at {active_run.started_at}, run_id={active_run.id}). "
+                        f"Please wait for it to complete or abort it first."
+                    )
+
+                # Create new run record
+                started_at = datetime.now(timezone.utc).isoformat()
+                result = conn.execute(
+                    self._generation_runs.insert().values(
+                        experiment_name=experiment_name,
+                        status=GenerationStatus.RUNNING.value,
+                        started_at=started_at,
+                        output_path=output_path,
+                        seed=seed,
+                    )
+                )
+                return result.lastrowid
+        except (GenerationAlreadyRunningError, ExperimentNotFoundError):
+            raise
+        except SQLAlchemyError as exc:
+            raise ExperimentMaterializationError(
+                f"Failed to start generation run for '{experiment_name}': {exc}"
+            ) from exc
+
+    def complete_generation_run(self, run_id: int, row_counts: str) -> None:
+        """Mark a generation run as completed with row count summary."""
+        try:
+            with self.engine.begin() as conn:
+                completed_at = datetime.now(timezone.utc).isoformat()
+                result = conn.execute(
+                    self._generation_runs.update()
+                    .where(self._generation_runs.c.id == run_id)
+                    .values(
+                        status=GenerationStatus.COMPLETED.value,
+                        completed_at=completed_at,
+                        row_counts=row_counts,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise GenerationRunNotFoundError(f"Generation run {run_id} not found.")
+        except GenerationRunNotFoundError:
+            raise
+        except SQLAlchemyError as exc:
+            raise ExperimentMaterializationError(
+                f"Failed to complete generation run {run_id}: {exc}"
+            ) from exc
+
+    def fail_generation_run(self, run_id: int, error_message: str) -> None:
+        """Mark a generation run as failed with error details."""
+        try:
+            with self.engine.begin() as conn:
+                completed_at = datetime.now(timezone.utc).isoformat()
+                result = conn.execute(
+                    self._generation_runs.update()
+                    .where(self._generation_runs.c.id == run_id)
+                    .values(
+                        status=GenerationStatus.FAILED.value,
+                        completed_at=completed_at,
+                        error_message=error_message,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise GenerationRunNotFoundError(f"Generation run {run_id} not found.")
+        except GenerationRunNotFoundError:
+            raise
+        except SQLAlchemyError as exc:
+            raise ExperimentMaterializationError(
+                f"Failed to mark generation run {run_id} as failed: {exc}"
+            ) from exc
+
+    def get_generation_run(self, run_id: int) -> GenerationRunMetadata | None:
+        """Fetch metadata for a specific generation run."""
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(
+                    self._generation_runs.c.id,
+                    self._generation_runs.c.experiment_name,
+                    self._generation_runs.c.status,
+                    self._generation_runs.c.started_at,
+                    self._generation_runs.c.completed_at,
+                    self._generation_runs.c.row_counts,
+                    self._generation_runs.c.output_path,
+                    self._generation_runs.c.error_message,
+                    self._generation_runs.c.seed,
+                ).where(self._generation_runs.c.id == run_id)
+            ).first()
+
+        if not row:
+            return None
+
+        return GenerationRunMetadata(
+            id=row.id,
+            experiment_name=row.experiment_name,
+            status=GenerationStatus(row.status),
+            started_at=datetime.fromisoformat(row.started_at),
+            completed_at=datetime.fromisoformat(row.completed_at) if row.completed_at else None,
+            row_counts=row.row_counts or "{}",
+            output_path=row.output_path,
+            error_message=row.error_message,
+            seed=row.seed,
+        )
+
+    def list_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
+        """List all generation runs for an experiment, most recent first."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    self._generation_runs.c.id,
+                    self._generation_runs.c.experiment_name,
+                    self._generation_runs.c.status,
+                    self._generation_runs.c.started_at,
+                    self._generation_runs.c.completed_at,
+                    self._generation_runs.c.row_counts,
+                    self._generation_runs.c.output_path,
+                    self._generation_runs.c.error_message,
+                    self._generation_runs.c.seed,
+                )
+                .where(self._generation_runs.c.experiment_name == experiment_name)
+                .order_by(self._generation_runs.c.started_at.desc())
+            ).all()
+
+        return [
+            GenerationRunMetadata(
+                id=row.id,
+                experiment_name=row.experiment_name,
+                status=GenerationStatus(row.status),
+                started_at=datetime.fromisoformat(row.started_at),
+                completed_at=datetime.fromisoformat(row.completed_at) if row.completed_at else None,
+                row_counts=row.row_counts or "{}",
+                output_path=row.output_path,
+                error_message=row.error_message,
+                seed=row.seed,
+            )
+            for row in rows
+        ]
+
     # Internal helpers -----------------------------------------------------------
 
     def _experiment_exists(self, conn: Connection, name: str) -> bool:
@@ -276,6 +483,10 @@ __all__ = [
     "ExperimentAlreadyExistsError",
     "ExperimentMaterializationError",
     "ExperimentNotFoundError",
+    "GenerationAlreadyRunningError",
+    "GenerationRunNotFoundError",
     "ExperimentMetadata",
+    "GenerationRunMetadata",
+    "GenerationStatus",
     "normalize_identifier",
 ]

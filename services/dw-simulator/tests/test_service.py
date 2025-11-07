@@ -19,6 +19,9 @@ from dw_simulator.persistence import (
     ExperimentMaterializationError,
     ExperimentMetadata,
     ExperimentNotFoundError,
+    GenerationAlreadyRunningError,
+    GenerationRunMetadata,
+    GenerationStatus,
 )
 from dw_simulator.schema import ExperimentSchema, TableSchema, ColumnSchema
 from dw_simulator.service import ExperimentService
@@ -42,10 +45,16 @@ class StubPersistence:
     delete_exception: Exception | None = None
     delete_return: int = 0
     schema: ExperimentSchema | None = None
+    start_run_exception: Exception | None = None
+    complete_run_exception: Exception | None = None
+    fail_run_exception: Exception | None = None
 
     def __post_init__(self) -> None:
         self.recorded_schema: ExperimentSchema | None = None
         self.listed: list[ExperimentMetadata] = []
+        self.next_run_id = 1
+        self.runs: dict[int, GenerationRunMetadata] = {}
+        self.started_runs: list[tuple[str, str | None, int | None]] = []
 
     def create_experiment(self, schema: ExperimentSchema) -> ExperimentMetadata:
         self.recorded_schema = schema
@@ -65,6 +74,70 @@ class StubPersistence:
 
     def get_experiment_metadata(self, name: str) -> ExperimentMetadata | None:
         return self.metadata
+
+    def start_generation_run(
+        self,
+        experiment_name: str,
+        output_path: str | None = None,
+        seed: int | None = None,
+    ) -> int:
+        if self.start_run_exception:
+            raise self.start_run_exception
+        run_id = self.next_run_id
+        self.next_run_id += 1
+        self.started_runs.append((experiment_name, output_path, seed))
+        self.runs[run_id] = GenerationRunMetadata(
+            id=run_id,
+            experiment_name=experiment_name,
+            status=GenerationStatus.RUNNING,
+            started_at=datetime.now(timezone.utc),
+            completed_at=None,
+            row_counts="{}",
+            output_path=output_path,
+            error_message=None,
+            seed=seed,
+        )
+        return run_id
+
+    def complete_generation_run(self, run_id: int, row_counts: str) -> None:
+        if self.complete_run_exception:
+            raise self.complete_run_exception
+        if run_id in self.runs:
+            old_run = self.runs[run_id]
+            self.runs[run_id] = GenerationRunMetadata(
+                id=old_run.id,
+                experiment_name=old_run.experiment_name,
+                status=GenerationStatus.COMPLETED,
+                started_at=old_run.started_at,
+                completed_at=datetime.now(timezone.utc),
+                row_counts=row_counts,
+                output_path=old_run.output_path,
+                error_message=None,
+                seed=old_run.seed,
+            )
+
+    def fail_generation_run(self, run_id: int, error_message: str) -> None:
+        if self.fail_run_exception:
+            raise self.fail_run_exception
+        if run_id in self.runs:
+            old_run = self.runs[run_id]
+            self.runs[run_id] = GenerationRunMetadata(
+                id=old_run.id,
+                experiment_name=old_run.experiment_name,
+                status=GenerationStatus.FAILED,
+                started_at=old_run.started_at,
+                completed_at=datetime.now(timezone.utc),
+                row_counts=old_run.row_counts,
+                output_path=old_run.output_path,
+                error_message=error_message,
+                seed=old_run.seed,
+            )
+
+    def get_generation_run(self, run_id: int) -> GenerationRunMetadata | None:
+        return self.runs.get(run_id)
+
+    def list_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
+        return [run for run in self.runs.values() if run.experiment_name == experiment_name]
 
 
 def valid_payload() -> dict[str, Any]:
@@ -288,3 +361,145 @@ def test_create_experiment_from_sql_invalid_dialect() -> None:
     result = service.create_experiment_from_sql(name="t", sql=sql, dialect="oracle")
     assert result.success is False
     assert "Unsupported dialect" in result.errors[0]
+
+
+def test_generate_data_creates_generation_run(tmp_path: Path) -> None:
+    """Test that generate_data creates a generation run record."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+    generation_result = GenerationResult(
+        experiment_name="ServiceExperiment",
+        output_dir=tmp_path / "out",
+        tables=[TableGenerationResult(table_name="customers", row_count=100, files=[])],
+    )
+    stub_generator = StubGenerator(result=generation_result)
+    service = ExperimentService(persistence=stub_persistence, generator=stub_generator)  # type: ignore[arg-type]
+
+    result = service.generate_data("ServiceExperiment", seed=42, output_dir=tmp_path)
+    assert result.success is True
+    assert len(stub_persistence.started_runs) == 1
+    assert stub_persistence.started_runs[0][0] == "ServiceExperiment"
+    assert stub_persistence.started_runs[0][2] == 42  # seed
+
+
+def test_generate_data_completes_run_on_success(tmp_path: Path) -> None:
+    """Test that successful generation marks run as completed with row counts."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+    generation_result = GenerationResult(
+        experiment_name="ServiceExperiment",
+        output_dir=tmp_path / "out",
+        tables=[
+            TableGenerationResult(table_name="customers", row_count=100, files=[]),
+            TableGenerationResult(table_name="orders", row_count=500, files=[]),
+        ],
+    )
+    stub_generator = StubGenerator(result=generation_result)
+    service = ExperimentService(persistence=stub_persistence, generator=stub_generator)  # type: ignore[arg-type]
+
+    result = service.generate_data("ServiceExperiment")
+    assert result.success is True
+    assert result.run_metadata is not None
+    assert result.run_metadata.status == GenerationStatus.COMPLETED
+    assert '"customers": 100' in result.run_metadata.row_counts
+    assert '"orders": 500' in result.run_metadata.row_counts
+
+
+def test_generate_data_fails_run_on_error() -> None:
+    """Test that generation errors mark run as failed with error message."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+    stub_generator = StubGenerator(
+        result=None,  # type: ignore[arg-type]
+        to_raise=GenerationError("Unable to generate unique values"),
+    )
+    service = ExperimentService(persistence=stub_persistence, generator=stub_generator)  # type: ignore[arg-type]
+
+    result = service.generate_data("ServiceExperiment")
+    assert result.success is False
+    assert result.run_id is not None
+
+    # Check that error was persisted
+    run = stub_persistence.get_generation_run(result.run_id)
+    assert run is not None
+    assert run.status == GenerationStatus.FAILED
+    assert "Unable to generate unique values" in run.error_message or "Unable to generate unique values" in result.errors[0]
+
+
+def test_generate_data_includes_traceback_in_error() -> None:
+    """Test that error reporting includes full traceback."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+    stub_generator = StubGenerator(
+        result=None,  # type: ignore[arg-type]
+        to_raise=ValueError("Invalid row count"),
+    )
+    service = ExperimentService(persistence=stub_persistence, generator=stub_generator)  # type: ignore[arg-type]
+
+    result = service.generate_data("ServiceExperiment")
+    assert result.success is False
+    assert "Traceback" in result.errors[0]
+    assert "ValueError" in result.errors[0]
+    assert "Invalid row count" in result.errors[0]
+
+
+def test_generate_data_handles_concurrent_generation_guard() -> None:
+    """Test that concurrent generation guard exception is handled properly."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        start_run_exception=GenerationAlreadyRunningError("Generation already running"),
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.generate_data("ServiceExperiment")
+    assert result.success is False
+    assert "already running" in result.errors[0].lower()
+
+
+def test_list_generation_runs_returns_persistence_data() -> None:
+    """Test that list_generation_runs delegates to persistence."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+    # Manually add a run
+    run = GenerationRunMetadata(
+        id=1,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.COMPLETED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        row_counts='{"customers": 100}',
+        output_path="/tmp/out",
+        error_message=None,
+        seed=42,
+    )
+    stub_persistence.runs[1] = run
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    runs = service.list_generation_runs("ServiceExperiment")
+    assert len(runs) == 1
+    assert runs[0].id == 1
+
+
+def test_get_generation_run_returns_persistence_data() -> None:
+    """Test that get_generation_run delegates to persistence."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+    run = GenerationRunMetadata(
+        id=1,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.COMPLETED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        row_counts='{"customers": 100}',
+        output_path="/tmp/out",
+        error_message=None,
+        seed=42,
+    )
+    stub_persistence.runs[1] = run
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    fetched_run = service.get_generation_run(1)
+    assert fetched_run is not None
+    assert fetched_run.id == 1
+    assert fetched_run.experiment_name == "ServiceExperiment"
