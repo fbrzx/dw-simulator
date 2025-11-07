@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import inspect
 
 from dw_simulator.persistence import (
+    DataLoadError,
     ExperimentAlreadyExistsError,
     ExperimentNotFoundError,
     ExperimentPersistence,
@@ -507,3 +508,77 @@ def test_execute_query_returns_empty_result_for_empty_table(tmp_path: Path) -> N
     assert result.row_count == 0
     assert len(result.rows) == 0
     assert len(result.columns) > 0  # Columns should still be present
+
+
+def test_load_parquet_files_to_table_replaces_existing_rows(tmp_path: Path) -> None:
+    """Loading Parquet data should replace existing table contents and return row count."""
+    from datetime import date
+    from sqlalchemy import text
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+
+    # Seed existing rows that should be replaced by the Parquet load
+    with persistence.engine.begin() as conn:
+        conn.execute(
+            text(
+                f'INSERT INTO "{physical_table}" (customer_id, email, signup_date) '
+                "VALUES (999, 'old@example.com', '2024-01-01')"
+            )
+        )
+
+    parquet_path = tmp_path / "customers.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "customer_id": pa.array([1, 2], type=pa.int64()),
+                "email": pa.array(["alice@example.com", "bob@example.com"]),
+                "signup_date": pa.array([date(2024, 1, 10), date(2024, 2, 5)], type=pa.date32()),
+            }
+        ),
+        parquet_path,
+        compression="snappy",
+    )
+
+    inserted = persistence.load_parquet_files_to_table(
+        experiment_name=schema.name,
+        table_name=schema.tables[0].name,
+        parquet_files=[parquet_path],
+    )
+
+    assert inserted == 2
+
+    with persistence.engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                f'SELECT customer_id, email, signup_date FROM "{physical_table}" ORDER BY customer_id'
+            )
+        ).fetchall()
+
+    assert rows == [
+        (1, "alice@example.com", "2024-01-10"),
+        (2, "bob@example.com", "2024-02-05"),
+    ]
+
+
+def test_load_parquet_files_to_table_missing_file(tmp_path: Path) -> None:
+    """Missing Parquet files should raise DataLoadError with a clear message."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    missing_path = tmp_path / "missing.parquet"
+
+    with pytest.raises(DataLoadError) as exc_info:
+        persistence.load_parquet_files_to_table(
+            experiment_name=schema.name,
+            table_name=schema.tables[0].name,
+            parquet_files=[missing_path],
+        )
+
+    assert "Missing Parquet files" in str(exc_info.value)

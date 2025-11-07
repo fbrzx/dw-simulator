@@ -74,14 +74,10 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 
 **Implementation Plan (6 steps):**
 
-**Step 1: Persistence layer - Parquet loading method (⏳ NEXT)**
-- Add `load_parquet_files_to_table()` method in `ExperimentPersistence` that:
-  - Accepts experiment name, table name, and list of Parquet file paths
-  - Reads Parquet files using pandas/pyarrow
-  - Inserts data into the physical table using SQLAlchemy bulk operations
-  - Handles errors (missing files, type mismatches)
-- Tests: `tests/test_persistence.py::test_load_parquet_files_to_table`
-- Coverage target: 95%
+**Step 1: Persistence layer - Parquet loading method (✅ COMPLETE)**
+- Added `ExperimentPersistence.load_parquet_files_to_table()` to validate parquet batches, clear existing table contents, and bulk insert rows via SQLAlchemy while surfacing actionable error messages (missing files, unknown tables, load failures).
+- Implemented regression tests in `tests/test_persistence.py` covering successful loads, replacement semantics, and missing-file errors.
+- Coverage target: 95% (met via unit suite).
 
 **Step 2: Persistence layer - Batch loading orchestration (⏳ pending)**
 - Add `load_generation_run()` method that:
@@ -134,7 +130,7 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All tests passing: `PYTHONPATH=src pytest --ignore=tests/test_integration.py` (target: 120+ tests)
 
 ## Recent Work
-- **Parquet data loading (US 5.1 - IN PROGRESS):** Planning phase complete. Identified critical gap: generated Parquet files are not loaded into database tables, making the query interface query empty tables. Designed 6-step implementation plan to enable auto-loading after generation plus manual load commands via CLI/API. Next: Step 1 - implement persistence layer loading method.
+- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 1 by implementing the persistence-level Parquet loader with comprehensive tests. Next up: Step 2 orchestration across full generation runs.
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.
