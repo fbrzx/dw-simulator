@@ -1,33 +1,19 @@
 # Implementation Status
 
-## Recently Completed
-**US 2.1** – As a user, I want to fill a selected experiment with synthetic data (target row count per table) so I have realistic volumes for testing. ✅ **COMPLETE**
+## Active User Story
+**US 2.1** – Enable experiment generation workflows (row targeting, uniqueness/date enforcement, CLI/API/UI triggers). **Status:** In progress.
 
-### Implementation Summary (5 steps - all complete)
-*SQL import & dialect support (✅ complete): Added sqlglot-based DDL ingestion, CLI/API endpoints, and UI toggle so experiments can originate from Redshift/Snowflake scripts.*
-1. **Generation design (✅ complete):** Defined the Faker/Parquet pipeline and orchestration touchpoints in `docs/tech-spec.md`.
-2. **Generation engine implementation (✅ complete):** Added `dw_simulator.generator`, service wiring, CLI/API commands, and comprehensive tests (generator, service, CLI, API). Verified via `cd services/dw-simulator && PYTHONPATH=src pytest` (41 tests, 90.86% coverage).
-3. **Orchestration & persistence wiring (✅ complete):** Extended `ExperimentService` with `generate_data` method (service.py:145-172), added CLI command `experiment generate` (cli.py:122-149), and API endpoint `POST /api/experiments/{name}/generate` (api.py:104-124). All US 2.1 acceptance criteria verified: exact target volumes, uniqueness enforcement, and date range constraints. Test suite expanded to 53 tests with 90.22% coverage. Linting passes with zero issues.
-4. **Integration & coverage (✅ complete):** Added comprehensive end-to-end integration tests in `tests/test_integration.py` (9 new tests) verifying:
-   - US 2.1 AC 1: Exact row counts match target volumes
-   - US 2.1 AC 2: Unique columns contain no duplicates
-   - US 2.1 AC 3: Date ranges are respected
-   - Additional validations: VARCHAR length constraints, numeric ranges, optional columns, row overrides, multi-table generation, and failure handling
-   Test suite expanded to 62 tests with 92% coverage (exceeds 90% requirement). All linting checks pass via `ruff check src/ tests/`.
-5. **Docs & UI updates (✅ complete):**
-   - Enhanced `services/dw-simulator/README.md` with comprehensive CLI and API documentation covering all generation options (row overrides, seed, output directory)
-   - Updated `services/web-ui/` with Generate functionality:
-     - Added "Generate" button to each experiment in the UI
-     - Implemented modal dialog for generation options (row overrides per table, optional seed)
-     - Integrated with `POST /api/experiments/{name}/generate` endpoint
-     - Shows generation results (total rows, table count)
-   - Updated `services/web-ui/README.md` to document Generate feature
-   - All 62 tests pass with 92% coverage, linting clean
+### Progress
+1. **Generation design (✅ complete):** Faker/Parquet batching approach documented in `docs/tech-spec.md`.
+2. **Generation engine implementation (✅ complete):** `dw_simulator.generator` plus CLI/API entry points (`dw-sim experiment generate`, `POST /api/experiments/{name}/generate`) with coverage in `tests/test_generator.py`, `tests/test_cli.py`, `tests/test_api.py`, and `tests/test_service.py`.
+3. **Orchestration & persistence wiring (🚧 next):** Add run-tracking metadata (generation_runs table), concurrent job guards, and richer error reporting.
+4. **Integration & coverage (pending):** End-to-end tests exercising generation via CLI/API, asserting persisted metadata, and covering failure/abort flows (target ≥90% after new code lands).
+5. **Docs & UI updates (pending):** Surface generation run status in the web UI, document the workflow in README/service docs, and update this status once complete.
 
-### Acceptance Criteria Verification
-✅ **US 2.1 AC 1**: Generated data matches exact target volumes (verified in tests/test_integration.py::test_integration_exact_row_counts)
-✅ **US 2.1 AC 2**: Unique columns contain zero duplicates (verified in tests/test_integration.py::test_integration_uniqueness_enforcement)
-✅ **US 2.1 AC 3**: Date values fall within specified ranges (verified in tests/test_integration.py::test_integration_date_range_constraints)
+## Recent Work
+- **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
+- **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), and data generation.
+- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest` (53 tests, ~90% coverage). Key suites include `tests/test_sql_importer.py`, `tests/test_cli.py`, `tests/test_api.py`, and `tests/test_generator.py`.
 
-## Next User Story
-Ready to begin next story from `docs/product-spec.md` (e.g., US 2.2, US 3.1, or higher-priority features).
+## Backlog
+**US 1.4** – Composite primary key support/guidance. When importing SQL like `public.ENT_RLEU_CWW_Sent`, the simulator should either represent multi-column uniqueness or generate a surrogate key and clearly explain it in the UI.
