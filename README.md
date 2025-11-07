@@ -60,6 +60,36 @@ The command validates the schema, persists metadata to SQLite (or the configured
 warehouse URL), and creates the physical tables. Errors are surfaced with the
 exact validation message(s).
 
+### Composite primary key support
+
+When importing SQL with composite primary keys, the simulator automatically handles
+them by adding a surrogate `_row_id` column and preserving the original key columns:
+
+```sql
+-- Input: schema.sql
+CREATE TABLE sales (
+  region_id INT NOT NULL,
+  store_id INT NOT NULL,
+  sale_date DATE,
+  amount DECIMAL(10,2),
+  PRIMARY KEY (region_id, store_id)
+);
+```
+
+```bash
+dw-sim experiment import-sql schema.sql --name sales_exp --dialect redshift
+# Output: Warning: Table 'sales' has a composite primary key (region_id, store_id).
+#         A surrogate key column '_row_id' has been added for generation.
+#         Original columns are preserved.
+
+dw-sim experiment generate sales_exp --rows sales=1000
+# Generates data with _row_id (1, 2, 3, ...) plus original composite key columns
+```
+
+The `_row_id` column ensures efficient unique data generation while maintaining schema
+fidelity. Warnings are displayed in the CLI, API responses, and Web UI to keep you
+informed of the transformation.
+
 ### Generation runs and tracking
 
 Every data generation operation is tracked as a "generation run" with the following metadata:

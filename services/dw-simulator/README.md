@@ -43,6 +43,86 @@ dw-sim experiment import-sql schema.sql --name my_experiment --dialect redshift
 The command reads the schema, validates it via Pydantic models, and persists it
 using the SQLite-backed persistence layer.
 
+#### Composite primary key handling
+
+The simulator automatically handles composite primary keys by generating a surrogate
+`_row_id` column while preserving the original key columns:
+
+**Example SQL with composite key:**
+```sql
+-- orders.sql
+CREATE TABLE orders (
+  customer_id BIGINT NOT NULL,
+  order_id BIGINT NOT NULL,
+  order_date DATE,
+  total_amount DECIMAL(10,2),
+  PRIMARY KEY (customer_id, order_id)
+);
+```
+
+**Import via CLI:**
+```bash
+dw-sim experiment import-sql orders.sql --name orders_exp --dialect redshift
+
+# Output:
+# Experiment 'orders_exp' created successfully.
+# Warning: Table 'orders' has a composite primary key (customer_id, order_id).
+#          A surrogate key column '_row_id' has been added for generation.
+#          Original columns are preserved.
+```
+
+**Import via API:**
+```bash
+curl -X POST http://localhost:8000/api/experiments/import-sql \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "orders_exp",
+    "sql": "CREATE TABLE orders (customer_id BIGINT NOT NULL, order_id BIGINT NOT NULL, PRIMARY KEY (customer_id, order_id));",
+    "dialect": "redshift",
+    "target_rows": 5000
+  }'
+
+# Response:
+# {
+#   "name": "orders_exp",
+#   "table_count": 1,
+#   "warnings": [
+#     "Table 'orders' has a composite primary key (customer_id, order_id). A surrogate key column '_row_id' has been added for generation. Original columns are preserved."
+#   ]
+# }
+```
+
+**Resulting schema structure:**
+The imported experiment will have:
+- A `_row_id` column (INT, unique, required) prepended to the column list
+- Original composite key columns preserved with their original data types
+- `composite_keys` metadata field: `[["customer_id", "order_id"]]`
+- User-facing warning in the `warnings` field
+
+**Generated data behavior:**
+```bash
+dw-sim experiment generate orders_exp --rows orders=100
+```
+
+Produces data like:
+```
+_row_id | customer_id | order_id | order_date | total_amount
+--------|-------------|----------|------------|-------------
+1       | 42          | 1001     | 2024-01-15 | 299.99
+2       | 17          | 1002     | 2024-01-16 | 450.00
+3       | 42          | 1003     | 2024-01-17 | 125.50
+```
+
+The `_row_id` column contains sequential integers (1, 2, 3, ..., N) ensuring uniqueness
+for data generation. The original composite key columns (`customer_id`, `order_id`) are
+generated according to their data types and constraints.
+
+**Warning visibility:**
+- **CLI**: Warnings are printed to stdout after import
+- **API**: `POST /api/experiments/import-sql` includes warnings in the response
+- **API**: `GET /api/experiments` includes warnings for each experiment in the list
+- **Web UI**: Warnings appear as dismissible banners after import and as badges on experiment cards
+
 #### Generate synthetic data
 
 ```bash
