@@ -268,3 +268,139 @@ def test_list_generation_runs_filters_by_experiment(tmp_path: Path) -> None:
     runs_b = persistence.list_generation_runs(schema_b.name)
     assert len(runs_b) == 1
     assert runs_b[0].id == run_id_b
+
+
+def test_reset_experiment_truncates_tables(tmp_path: Path) -> None:
+    """Test that reset truncates all tables but keeps schema intact."""
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Insert some test data into the table
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+    with persistence.engine.begin() as conn:
+        conn.execute(
+            text(f'INSERT INTO "{physical_table}" (customer_id, email, signup_date) VALUES (1, \'test@example.com\', \'2024-01-01\')')
+        )
+        # Verify data exists
+        result = conn.execute(text(f'SELECT COUNT(*) FROM "{physical_table}"'))
+        count = result.scalar()
+        assert count == 1
+
+    # Reset the experiment
+    reset_count = persistence.reset_experiment(schema.name)
+    assert reset_count == 1
+
+    # Verify table still exists but is empty
+    inspector = inspect(persistence.engine)
+    assert inspector.has_table(physical_table)
+    with persistence.engine.connect() as conn:
+        result = conn.execute(text(f'SELECT COUNT(*) FROM "{physical_table}"'))
+        count = result.scalar()
+        assert count == 0
+
+    # Verify metadata still exists
+    metadata = persistence.get_experiment_metadata(schema.name)
+    assert metadata is not None
+    assert metadata.name == schema.name
+
+
+def test_reset_experiment_not_found(tmp_path: Path) -> None:
+    """Test that resetting a non-existent experiment raises error."""
+    persistence = create_persistence(tmp_path)
+    with pytest.raises(ExperimentNotFoundError):
+        persistence.reset_experiment("unknown")
+
+
+def test_reset_experiment_blocks_during_active_generation(tmp_path: Path) -> None:
+    """Test that reset is blocked when generation is running (AC 2)."""
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Start a generation run (RUNNING status)
+    run_id = persistence.start_generation_run(experiment_name=schema.name)
+
+    # Attempt to reset should fail
+    with pytest.raises(GenerationAlreadyRunningError) as exc_info:
+        persistence.reset_experiment(schema.name)
+
+    assert "Cannot reset experiment" in str(exc_info.value)
+    assert "generation is running" in str(exc_info.value)
+
+    # Complete the run
+    persistence.complete_generation_run(run_id, '{"customers": 100}')
+
+    # Now reset should succeed
+    reset_count = persistence.reset_experiment(schema.name)
+    assert reset_count == 1
+
+
+def test_reset_experiment_with_multiple_tables(tmp_path: Path) -> None:
+    """Test that reset truncates all tables in a multi-table experiment."""
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = ExperimentSchema(
+        name="MultiTableTest",
+        description="Test with multiple tables",
+        tables=[
+            TableSchema(
+                name="users",
+                target_rows=50,
+                columns=[ColumnSchema(name="user_id", data_type="INT", is_unique=True)],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=100,
+                columns=[ColumnSchema(name="order_id", data_type="INT", is_unique=True)],
+            ),
+        ],
+    )
+    persistence.create_experiment(schema)
+
+    # Insert data into both tables
+    users_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('users')}"
+    orders_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('orders')}"
+    with persistence.engine.begin() as conn:
+        conn.execute(text(f'INSERT INTO "{users_table}" (user_id) VALUES (1), (2)'))
+        conn.execute(text(f'INSERT INTO "{orders_table}" (order_id) VALUES (10), (20), (30)'))
+
+    # Reset
+    reset_count = persistence.reset_experiment(schema.name)
+    assert reset_count == 2
+
+    # Verify both tables are empty
+    with persistence.engine.connect() as conn:
+        users_count = conn.execute(text(f'SELECT COUNT(*) FROM "{users_table}"')).scalar()
+        orders_count = conn.execute(text(f'SELECT COUNT(*) FROM "{orders_table}"')).scalar()
+        assert users_count == 0
+        assert orders_count == 0
+
+
+def test_reset_experiment_row_count_zero_after_reset(tmp_path: Path) -> None:
+    """Test acceptance criteria 3: row count is 0 after reset."""
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    # Insert test data
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+    with persistence.engine.begin() as conn:
+        for i in range(10):
+            conn.execute(
+                text(f'INSERT INTO "{physical_table}" (customer_id, email, signup_date) VALUES ({i}, \'test{i}@example.com\', \'2024-01-01\')')
+            )
+
+    # Reset
+    persistence.reset_experiment(schema.name)
+
+    # Verify row count is 0 (AC 3)
+    with persistence.engine.connect() as conn:
+        result = conn.execute(text(f'SELECT COUNT(*) FROM "{physical_table}"'))
+        count = result.scalar()
+        assert count == 0

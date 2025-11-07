@@ -13,6 +13,7 @@ from . import __version__
 from .service import (
     ExperimentCreateResult,
     ExperimentDeleteResult,
+    ExperimentResetResult,
     ExperimentGenerateResult,
     ExperimentService,
     SUPPORTED_DIALECTS,
@@ -105,6 +106,17 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             )
         return {"name": name, "dropped_tables": result.deleted_tables}
 
+    @app.post("/api/experiments/{name}/reset")
+    def reset_experiment(name: str) -> dict[str, Any]:
+        """Reset an experiment by truncating all tables without deleting the schema."""
+        result = _service().reset_experiment(name)
+        if not result.success:
+            raise HTTPException(
+                status_code=_http_status_for_errors(result),
+                detail=result.errors,
+            )
+        return {"name": name, "reset_tables": result.reset_tables}
+
     @app.post("/api/experiments/{name}/generate", status_code=status.HTTP_202_ACCEPTED)
     def generate_experiment(name: str, payload: GeneratePayload) -> dict[str, Any]:
         result = _service().generate_data(
@@ -193,7 +205,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
 
 
 def _http_status_for_errors(
-    result: ExperimentCreateResult | ExperimentDeleteResult | ExperimentGenerateResult,
+    result: ExperimentCreateResult | ExperimentDeleteResult | ExperimentResetResult | ExperimentGenerateResult,
 ) -> int:
     """Translate domain errors into HTTP statuses."""
 
@@ -201,6 +213,8 @@ def _http_status_for_errors(
     if "does not exist" in messages:
         return status.HTTP_404_NOT_FOUND
     if "already exists" in messages:
+        return status.HTTP_409_CONFLICT
+    if "already running" in messages or "generation is running" in messages:
         return status.HTTP_409_CONFLICT
     return status.HTTP_400_BAD_REQUEST
 

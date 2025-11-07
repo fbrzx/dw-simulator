@@ -21,6 +21,7 @@ from .config import get_stage_bucket, get_target_db_url
 from .service import (
     ExperimentCreateResult,
     ExperimentDeleteResult,
+    ExperimentResetResult,
     ExperimentGenerateResult,
     ExperimentService,
     SUPPORTED_DIALECTS,
@@ -119,6 +120,21 @@ def delete_experiment(name: str = typer.Argument(..., help="Name of the experime
     )
 
 
+@experiment_app.command("reset")
+def reset_experiment(name: str = typer.Argument(..., help="Name of the experiment to reset.")) -> None:
+    """Reset an experiment by truncating all tables without deleting the schema."""
+
+    service = ExperimentService()
+    result = service.reset_experiment(name)
+    if not result.success:
+        _print_errors_and_exit(result)
+
+    typer.secho(
+        f"Experiment '{name}' reset (truncated {result.reset_tables} tables).",
+        fg=typer.colors.GREEN,
+    )
+
+
 @experiment_app.command("generate")
 def generate_experiment(
     name: str = typer.Argument(..., help="Experiment name to generate data for."),
@@ -174,7 +190,7 @@ def import_sql_command(
     typer.secho(f"Experiment '{name}' created from SQL ({dialect})", fg=typer.colors.GREEN)
 
 
-def _print_errors_and_exit(result: ExperimentDeleteResult | ExperimentCreateResult | ExperimentGenerateResult) -> None:
+def _print_errors_and_exit(result: ExperimentDeleteResult | ExperimentCreateResult | ExperimentResetResult | ExperimentGenerateResult) -> None:
     for error in result.errors:
         typer.secho(error, err=True, fg=typer.colors.RED)
     raise typer.Exit(code=1)

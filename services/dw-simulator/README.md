@@ -167,6 +167,25 @@ dw-sim experiment delete my_experiment
 
 Removes metadata, generation run history, and drops all physical tables for the experiment. The simulator also wipes any generated Parquet folders under `data/generated/my_experiment` (and other run output directories inside `data/`).
 
+#### Reset experiments
+
+```bash
+dw-sim experiment reset my_experiment
+```
+
+Truncates all tables in the experiment without deleting the schema or metadata. This is useful when you want to clear generated data and start fresh without recreating the entire experiment.
+
+**What it does:**
+- Truncates (empties) all physical tables in the experiment
+- Preserves the experiment schema and metadata
+- Guards against reset during active generation runs (returns error if generation is RUNNING)
+- After reset, tables have 0 rows and can be regenerated normally
+
+**Important:**
+- Reset is **blocked** if a generation run is currently active (US 2.2 AC 2)
+- All table row counts return to 0 after reset (US 2.2 AC 3)
+- The experiment can be immediately regenerated after reset
+
 ### FastAPI control plane
 
 The service exposes HTTP endpoints (default port `8000`) for the Web UI / REST flows:
@@ -217,6 +236,13 @@ All fields are optional. Returns generation summary with row counts and file pat
 DELETE /api/experiments/{name}
 ```
 Removes metadata and drops physical tables.
+
+**Reset experiment**
+```
+POST /api/experiments/{name}/reset
+```
+Truncates all tables without deleting schema. Returns `{"name": "...", "reset_tables": N}`.
+Blocked with HTTP 409 if generation is currently running.
 
 **Import SQL**
 ```

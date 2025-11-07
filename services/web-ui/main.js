@@ -108,11 +108,13 @@ const renderExperiments = (experiments) => {
       <div class="button-group">
         <button class="secondary view-runs-btn" data-name="${experiment.name}">View Runs</button>
         <button class="secondary generate-btn" data-name="${experiment.name}">Generate</button>
+        <button class="secondary reset-btn" data-name="${experiment.name}">Reset</button>
         <button class="danger" data-name="${experiment.name}">Delete</button>
       </div>
     `;
     item.querySelector('.view-runs-btn').addEventListener('click', () => openRunsModal(experiment.name));
     item.querySelector('.generate-btn').addEventListener('click', () => openGenerateModal(experiment.name));
+    item.querySelector('.reset-btn').addEventListener('click', () => resetExperiment(experiment.name));
     item.querySelector('.danger').addEventListener('click', () => deleteExperiment(experiment.name));
 
     if (Array.isArray(experiment.warnings) && experiment.warnings.length > 0) {
@@ -247,6 +249,28 @@ const deleteExperiment = async (name) => {
   } catch (error) {
     console.error(error);
     setStatus(error.message || 'Failed to delete experiment', 'error');
+  }
+};
+
+const resetExperiment = async (name) => {
+  if (!confirm(`Reset experiment "${name}"? This will truncate all tables but keep the schema.`)) {
+    return;
+  }
+  setStatus(`Resetting ${name}...`);
+  try {
+    const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(name)}/reset`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const errorBody = await response.json();
+      throw new Error((errorBody.detail || []).join(' '));
+    }
+    const result = await response.json();
+    setStatus(`Experiment ${name} reset (${result.reset_tables} table(s) truncated).`, 'success');
+    await fetchExperiments();
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message || 'Failed to reset experiment', 'error');
   }
 };
 
