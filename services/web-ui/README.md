@@ -17,6 +17,12 @@ A lightweight, dependency-free control panel to manage DW Simulator experiments.
   - Automatic polling every 3 seconds for live updates
   - Detailed run metadata (timestamps, duration, row counts, errors)
   - Full error messages and tracebacks for debugging failed runs
+- **Execute SQL queries** against populated experiments with:
+  - Interactive query editor with syntax highlighting
+  - Results displayed in formatted tables
+  - Export results to CSV format
+  - Save queries as .sql files for reuse
+  - Clear error messages for syntax errors
 - **Delete experiments** and drop their corresponding tables.
 
 ## Running locally
@@ -35,3 +41,52 @@ A lightweight, dependency-free control panel to manage DW Simulator experiments.
 
 Docker Compose already includes an `nginx` powered `web-ui` service that serves
 this folder and proxies to the Python API.
+
+## Using the Query Interface
+
+The web UI includes a SQL query interface that allows you to query your populated experiments directly from the browser.
+
+### Executing Queries
+
+1. Navigate to the **SQL Query Interface** section on the control panel
+2. Enter your SQL query in the text area. Example:
+   ```sql
+   SELECT * FROM customers_experiment__customers LIMIT 10;
+   ```
+3. Click **Execute Query** to run the query
+4. Results will be displayed in a formatted table below the query input
+
+### Query Features
+
+- **Clear**: Clears the current query and results
+- **Save SQL**: Downloads the query text as a `.sql` file for reuse
+- **Export CSV**: After executing a query, export the results as a CSV file
+- **Row Count**: Displays the number of rows returned by the query
+- **Error Handling**: Clear error messages are shown for syntax errors or execution failures
+
+### Example Queries
+
+Basic selection:
+```sql
+SELECT * FROM my_experiment__users LIMIT 100;
+```
+
+With filtering and ordering:
+```sql
+SELECT customer_id, email, registration_date
+FROM customers_experiment__customers
+WHERE registration_date > '2024-01-01'
+ORDER BY registration_date DESC;
+```
+
+Aggregations:
+```sql
+SELECT COUNT(*) as total_orders, AVG(order_total) as avg_order_value
+FROM orders_experiment__orders;
+```
+
+### Notes
+
+- Table names follow the pattern: `{experiment_name}__{table_name}`
+- The query interface uses the same backend as the CLI (`dw-sim query execute`)
+- Query execution is synchronous - large result sets may take some time to render

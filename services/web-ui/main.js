@@ -517,5 +517,195 @@ runsModal.addEventListener('click', (e) => {
   }
 });
 
+// Query Interface
+const queryForm = document.getElementById('query-form');
+const queryInput = document.getElementById('query-input');
+const queryStatus = document.getElementById('query-status');
+const queryResultsContainer = document.getElementById('query-results-container');
+const queryResults = document.getElementById('query-results');
+const rowCountDisplay = document.getElementById('row-count-display');
+const clearQueryBtn = document.getElementById('clear-query-btn');
+const saveQueryBtn = document.getElementById('save-query-btn');
+const exportCsvBtn = document.getElementById('export-csv-btn');
+
+let lastQueryResult = null;
+
+const setQueryStatus = (message, type = 'info') => {
+  if (!queryStatus) return;
+  queryStatus.textContent = message;
+  queryStatus.className = `query-status ${type}`;
+  queryStatus.classList.remove('hidden');
+};
+
+const clearQueryStatus = () => {
+  if (!queryStatus) return;
+  queryStatus.textContent = '';
+  queryStatus.className = 'query-status';
+  queryStatus.classList.add('hidden');
+};
+
+const executeQuery = async (event) => {
+  event.preventDefault();
+
+  const sql = queryInput.value.trim();
+  if (!sql) {
+    setQueryStatus('Please enter a SQL query.', 'error');
+    return;
+  }
+
+  // Hide previous results
+  queryResultsContainer.classList.add('hidden');
+  lastQueryResult = null;
+
+  setQueryStatus('Executing query...');
+
+  try {
+    const response = await fetch(`${API_BASE}/query/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, format: 'json' }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json();
+      throw new Error((errorBody.detail || []).join(' '));
+    }
+
+    const result = await response.json();
+    lastQueryResult = result;
+    renderQueryResults(result);
+    setQueryStatus(`Query executed successfully. ${result.row_count} row(s) returned.`, 'success');
+  } catch (error) {
+    console.error(error);
+    setQueryStatus(error.message || 'Failed to execute query', 'error');
+  }
+};
+
+const renderQueryResults = (result) => {
+  if (!result || !result.columns || !result.rows) {
+    queryResults.innerHTML = '<p>No results to display.</p>';
+    return;
+  }
+
+  // Update row count display
+  rowCountDisplay.textContent = `${result.row_count} row(s)`;
+
+  // Create table
+  const table = document.createElement('table');
+  table.className = 'results-table';
+
+  // Create header
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  result.columns.forEach((column) => {
+    const th = document.createElement('th');
+    th.textContent = column;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  // Create body
+  const tbody = document.createElement('tbody');
+  result.rows.forEach((row) => {
+    const tr = document.createElement('tr');
+    row.forEach((cell) => {
+      const td = document.createElement('td');
+      td.textContent = cell === null ? 'NULL' : cell;
+      if (cell === null) {
+        td.className = 'null-value';
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  queryResults.innerHTML = '';
+  queryResults.appendChild(table);
+  queryResultsContainer.classList.remove('hidden');
+};
+
+const clearQuery = () => {
+  queryInput.value = '';
+  queryResultsContainer.classList.add('hidden');
+  lastQueryResult = null;
+  clearQueryStatus();
+};
+
+const saveQuery = () => {
+  const sql = queryInput.value.trim();
+  if (!sql) {
+    setQueryStatus('No query to save.', 'error');
+    return;
+  }
+
+  // Create a Blob with the SQL content
+  const blob = new Blob([sql], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+
+  // Create a temporary download link
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `query_${new Date().toISOString().replace(/[:.]/g, '-')}.sql`;
+  document.body.appendChild(a);
+  a.click();
+
+  // Clean up
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  setQueryStatus('Query saved successfully.', 'success');
+};
+
+const exportCsv = async () => {
+  if (!lastQueryResult) {
+    setQueryStatus('No query results to export.', 'error');
+    return;
+  }
+
+  const sql = queryInput.value.trim();
+  setQueryStatus('Exporting to CSV...');
+
+  try {
+    const response = await fetch(`${API_BASE}/query/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, format: 'csv' }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json();
+      throw new Error((errorBody.detail || []).join(' '));
+    }
+
+    // Get the CSV content as blob
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+
+    // Create a temporary download link
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `query_results_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+
+    // Clean up
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setQueryStatus('Results exported to CSV successfully.', 'success');
+  } catch (error) {
+    console.error(error);
+    setQueryStatus(error.message || 'Failed to export CSV', 'error');
+  }
+};
+
+// Event listeners for query interface
+queryForm.addEventListener('submit', executeQuery);
+clearQueryBtn.addEventListener('click', clearQuery);
+saveQueryBtn.addEventListener('click', saveQuery);
+exportCsvBtn.addEventListener('click', exportCsv);
+
 switchMode('json');
 fetchExperiments();
