@@ -6,10 +6,8 @@ from pydantic import ValidationError
 
 from dw_simulator.schema import (
     ColumnSchema,
-    DataType,
     ExperimentSchema,
     SchemaValidationResult,
-    TableSchema,
     parse_experiment_schema,
     validate_experiment_payload,
 )
