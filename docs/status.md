@@ -59,9 +59,82 @@ Enable users to define data generation rules for columns to produce realistic, c
 
 ## Active User Story
 
-None - all user stories from Epic E3 and US 4.1 complete.
+### US 5.1 – Load generated Parquet files into warehouse tables (🔄 IN PROGRESS)
+Enable the query interface to access generated data by loading Parquet files into physical database tables.
+
+**Context:**
+Currently, `dw-sim experiment generate` produces Parquet files on the local filesystem but does NOT load them into the physical database tables. The query interface (`dw-sim query execute`) works but queries empty tables. This story bridges that gap by implementing automatic data loading after generation.
+
+**Acceptance Criteria:**
+1. **AC 1 (Auto-load after generation):** GIVEN a user runs `dw-sim experiment generate <name>`, WHEN generation completes successfully, THEN the generated Parquet files are automatically loaded into the corresponding physical database tables.
+2. **AC 2 (Verify loaded data):** GIVEN data has been loaded, WHEN a user executes `SELECT COUNT(*) FROM <experiment>__<table>`, THEN the query returns the exact row count that was generated.
+3. **AC 3 (Manual load command):** GIVEN Parquet files exist for an experiment, WHEN a user runs `dw-sim experiment load <name>`, THEN the data is loaded/reloaded into database tables.
+4. **AC 4 (API endpoint):** GIVEN an API client, WHEN they POST to `/api/experiments/{name}/load`, THEN the system loads the most recent generation run's Parquet files.
+5. **AC 5 (Error handling):** GIVEN loading fails (e.g., missing files, schema mismatch), WHEN the error occurs, THEN clear error messages are returned with actionable context.
+
+**Implementation Plan (6 steps):**
+
+**Step 1: Persistence layer - Parquet loading method (⏳ NEXT)**
+- Add `load_parquet_files_to_table()` method in `ExperimentPersistence` that:
+  - Accepts experiment name, table name, and list of Parquet file paths
+  - Reads Parquet files using pandas/pyarrow
+  - Inserts data into the physical table using SQLAlchemy bulk operations
+  - Handles errors (missing files, type mismatches)
+- Tests: `tests/test_persistence.py::test_load_parquet_files_to_table`
+- Coverage target: 95%
+
+**Step 2: Persistence layer - Batch loading orchestration (⏳ pending)**
+- Add `load_generation_run()` method that:
+  - Fetches generation run metadata by run_id
+  - Locates all Parquet files from the generation output directory
+  - Calls `load_parquet_files_to_table()` for each table in sequence
+  - Tracks loading progress and errors
+- Tests: `tests/test_persistence.py::test_load_generation_run`
+- Coverage target: 95%
+
+**Step 3: Service layer - Integrate loading into generation workflow (⏳ pending)**
+- Update `ExperimentService.generate_data()` to:
+  - After successful Parquet generation, automatically call `persistence.load_generation_run(run_id)`
+  - Update generation run metadata with loading status
+  - Return loading errors if they occur (generation succeeds but loading fails)
+- Tests: `tests/test_service.py::test_generate_with_auto_load`
+- Coverage target: 90%
+
+**Step 4: Service layer - Manual load operation (⏳ pending)**
+- Add `ExperimentService.load_experiment_data()` method:
+  - Accepts experiment name and optional run_id
+  - If no run_id provided, loads the most recent completed run
+  - Validates experiment exists and has generation runs
+  - Calls `persistence.load_generation_run(run_id)`
+- Add result class: `ExperimentLoadResult(success, errors, loaded_tables, row_counts)`
+- Tests: `tests/test_service.py::test_load_experiment_data`
+- Coverage target: 90%
+
+**Step 5: CLI and API surface (⏳ pending)**
+- **CLI:** Add `dw-sim experiment load <name> [--run-id N]` command
+  - Default: loads most recent generation run
+  - `--run-id`: loads specific run
+  - Displays success/error feedback and row counts per table
+- **API:** Add `POST /api/experiments/{name}/load` endpoint
+  - Request body: `{"run_id": int | null}`
+  - Response: `{"experiment": str, "loaded_tables": int, "row_counts": {...}}`
+  - HTTP status codes: 200 (success), 404 (not found), 409 (no runs), 500 (load error)
+- Tests: `tests/test_cli.py::test_load_command`, `tests/test_api.py::test_load_endpoint`
+- Coverage target: 90%
+
+**Step 6: Integration tests and documentation (⏳ pending)**
+- **Integration test:** End-to-end workflow test
+  - Create experiment → Generate data → Verify auto-load → Query loaded data → Verify row counts match
+  - Test manual load command on existing generation run
+- **Update documentation:**
+  - `README.md`: Add "Querying Generated Data" section explaining auto-load behavior
+  - `services/dw-simulator/README.md`: Document `dw-sim experiment load` command with examples
+  - Update US 3.1 documentation to reflect that queries now access loaded data
+- Coverage target: Full end-to-end coverage
+- All tests passing: `PYTHONPATH=src pytest --ignore=tests/test_integration.py` (target: 120+ tests)
 
 ## Recent Work
+- **Parquet data loading (US 5.1 - IN PROGRESS):** Planning phase complete. Identified critical gap: generated Parquet files are not loaded into database tables, making the query interface query empty tables. Designed 6-step implementation plan to enable auto-loading after generation plus manual load commands via CLI/API. Next: Step 1 - implement persistence layer loading method.
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.
