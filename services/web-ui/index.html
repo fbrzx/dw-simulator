@@ -77,6 +77,40 @@
 }</pre>
           </details>
         </section>
+
+        <section class="panel">
+          <h2>SQL Query Interface</h2>
+          <p class="query-description">Execute SQL queries against your populated experiments and export results.</p>
+
+          <form id="query-form">
+            <label for="query-input">SQL Query</label>
+            <textarea
+              id="query-input"
+              rows="8"
+              placeholder="SELECT * FROM experiment_name__table_name LIMIT 10;"
+              required
+            ></textarea>
+
+            <div class="query-actions">
+              <button type="submit" class="primary">Execute Query</button>
+              <button type="button" id="clear-query-btn" class="secondary">Clear</button>
+              <button type="button" id="save-query-btn" class="secondary">Save SQL</button>
+            </div>
+          </form>
+
+          <div id="query-status" class="query-status" role="status" aria-live="polite"></div>
+
+          <div id="query-results-container" class="hidden">
+            <div class="results-header">
+              <h3>Query Results</h3>
+              <div class="results-actions">
+                <span id="row-count-display"></span>
+                <button type="button" id="export-csv-btn" class="secondary">Export CSV</button>
+              </div>
+            </div>
+            <div id="query-results" class="query-results"></div>
+          </div>
+        </section>
       </main>
     </div>
 

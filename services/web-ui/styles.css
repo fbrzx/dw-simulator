@@ -429,3 +429,118 @@ button.cancel-btn {
   border-radius: 10px;
   background: #0f141b;
 }
+
+/* Query Interface styles */
+.query-description {
+  color: #8b949e;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.query-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.query-status {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.query-status.hidden {
+  display: none;
+}
+
+.query-status.info {
+  background: rgba(47, 129, 247, 0.15);
+  border: 1px solid rgba(47, 129, 247, 0.4);
+  color: #58a6ff;
+}
+
+.query-status.success {
+  background: rgba(45, 164, 78, 0.15);
+  border: 1px solid rgba(45, 164, 78, 0.4);
+  color: #3fb950;
+}
+
+.query-status.error {
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  color: var(--danger);
+}
+
+#query-results-container {
+  margin-top: 1.5rem;
+}
+
+#query-results-container.hidden {
+  display: none;
+}
+
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #30363d;
+}
+
+.results-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.results-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+#row-count-display {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+
+.query-results {
+  overflow-x: auto;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.results-table th {
+  background: #0f141b;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #30363d;
+  white-space: nowrap;
+}
+
+.results-table td {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid #21262d;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.results-table tbody tr:hover {
+  background: rgba(47, 129, 247, 0.05);
+}
+
+.results-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.results-table td.null-value {
+  color: #8b949e;
+  font-style: italic;
+}

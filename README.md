@@ -6,10 +6,9 @@ under `./services` and is orchestrated via `docker-compose.yml`.
 
 ## Service layout
 
-- `services/dw-simulator` – Python synthetic data generator + CLI (runs only as
+- `services/dw-simulator` – Python synthetic data generator + CLI + FastAPI server (runs as
   the `synthetic-data-generator` Docker Compose service).
-- `services/web-ui` – Placeholder for the future UI that lets users manage
-  experiments and run queries.
+- `services/web-ui` – Static web UI for managing experiments, generating data, and executing SQL queries.
 - `services/data-loader` – Placeholder for the batch/ELT worker that moves
   staged Parquet data into the local Redshift/Snowflake mocks.
 
@@ -325,6 +324,36 @@ You can save your SQL queries to `.sql` files for reuse:
 dw-sim query save "SELECT * FROM my_experiment__customers WHERE age > 18" --output query.sql
 ```
 
+**Query via Web UI:**
+1. Open http://localhost:4173
+2. Navigate to the **SQL Query Interface** section
+3. Enter your SQL query in the text area
+4. Click **Execute Query** to run the query
+5. Results are displayed in a formatted table with:
+   - Column headers matching your schema
+   - Row count displayed at the top
+   - NULL values clearly marked
+6. Use the action buttons:
+   - **Clear**: Reset the query and results
+   - **Save SQL**: Download the query as a `.sql` file
+   - **Export CSV**: Download the results as a CSV file
+
+**Example queries in the Web UI:**
+```sql
+-- Basic selection
+SELECT * FROM customers_experiment__customers LIMIT 100;
+
+-- With filtering and ordering
+SELECT customer_id, email, registration_date
+FROM customers_experiment__customers
+WHERE registration_date > '2024-01-01'
+ORDER BY registration_date DESC;
+
+-- Aggregations
+SELECT COUNT(*) as total_orders, AVG(order_total) as avg_order_value
+FROM orders_experiment__orders;
+```
+
 ### Query features
 
 The query interface supports:
@@ -337,9 +366,15 @@ The query interface supports:
 
 - The Python service now ships with a FastAPI control plane (default port `8000`)
   exposing `GET/POST/DELETE /api/experiments`, `POST /api/experiments/{name}/generate`,
-  `POST /api/experiments/{name}/reset`, and `POST /api/experiments/import-sql`.
+  `POST /api/experiments/{name}/reset`, `POST /api/query/execute`, and `POST /api/experiments/import-sql`.
 - Run it locally via `dw-sim api --host 0.0.0.0 --port 8000` (or `docker compose up
   synthetic-data-generator`).
 - `services/web-ui` contains a static UI (served via Docker Compose or
-  `python -m http.server 4173`) that lets you list/create/delete/reset experiments,
-  paste JSON schemas, or import SQL DDL for Redshift/Snowflake.
+  `python -m http.server 4173`) that lets you:
+  - List/create/delete/reset experiments
+  - Paste JSON schemas or import SQL DDL for Redshift/Snowflake
+  - Generate synthetic data with custom row counts and seeds
+  - View generation run history with real-time status tracking
+  - **Execute SQL queries** against populated experiments
+  - Export query results to CSV format
+  - Save queries as `.sql` files for reuse
