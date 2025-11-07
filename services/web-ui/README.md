@@ -12,6 +12,11 @@ A lightweight, dependency-free control panel to manage DW Simulator experiments.
   - Override row counts per table
   - Set a seed for deterministic generation
   - View generation results (row counts)
+- **View generation runs** for each experiment with:
+  - Real-time status tracking (RUNNING, COMPLETED, FAILED, ABORTED)
+  - Automatic polling every 3 seconds for live updates
+  - Detailed run metadata (timestamps, duration, row counts, errors)
+  - Full error messages and tracebacks for debugging failed runs
 - **Delete experiments** and drop their corresponding tables.
 
 ## Running locally

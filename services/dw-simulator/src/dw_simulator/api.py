@@ -67,12 +67,14 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
         summaries = []
         for experiment in experiments:
             table_names = _service().persistence.list_tables(experiment.name)
+            # Include schema for UI to show table details
             summaries.append(
                 {
                     "name": experiment.name,
                     "description": experiment.description,
                     "created_at": experiment.created_at.isoformat(),
                     "table_count": len(table_names),
+                    "schema": experiment.schema_json,
                 }
             )
         return {"experiments": summaries}
@@ -121,6 +123,48 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
                 {"name": table.table_name, "row_count": table.row_count, "files": [str(f) for f in table.files]}
                 for table in result.summary.tables
             ],
+        }
+
+    @app.get("/api/experiments/{name}/runs")
+    def list_generation_runs(name: str) -> dict[str, Any]:
+        """List all generation runs for an experiment, most recent first."""
+        runs = _service().persistence.list_generation_runs(name)
+        return {
+            "runs": [
+                {
+                    "id": run.id,
+                    "experiment_name": run.experiment_name,
+                    "status": run.status.value,
+                    "started_at": run.started_at.isoformat(),
+                    "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                    "row_counts": run.row_counts,
+                    "output_path": run.output_path,
+                    "error_message": run.error_message,
+                    "seed": run.seed,
+                }
+                for run in runs
+            ]
+        }
+
+    @app.get("/api/experiments/{name}/runs/{run_id}")
+    def get_generation_run(name: str, run_id: int) -> dict[str, Any]:
+        """Get details of a specific generation run."""
+        run = _service().persistence.get_generation_run(run_id)
+        if not run or run.experiment_name != name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=[f"Generation run {run_id} not found for experiment {name}"],
+            )
+        return {
+            "id": run.id,
+            "experiment_name": run.experiment_name,
+            "status": run.status.value,
+            "started_at": run.started_at.isoformat(),
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "row_counts": run.row_counts,
+            "output_path": run.output_path,
+            "error_message": run.error_message,
+            "seed": run.seed,
         }
 
     @app.post("/api/experiments/import-sql", status_code=status.HTTP_201_CREATED)

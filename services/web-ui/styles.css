@@ -251,3 +251,104 @@ button.cancel-btn {
   display: flex;
   gap: 0.5rem;
 }
+
+/* Generation runs styles */
+.runs-modal-content {
+  max-width: 700px;
+}
+
+.runs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.run-card {
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 1rem;
+  background: #0f141b;
+}
+
+.run-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.run-status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.run-status.COMPLETED {
+  background: #2da44e;
+  color: white;
+}
+
+.run-status.RUNNING {
+  background: #f0883e;
+  color: white;
+}
+
+.run-status.FAILED {
+  background: var(--danger);
+  color: white;
+}
+
+.run-status.ABORTED {
+  background: #6e7781;
+  color: white;
+}
+
+.run-details {
+  font-size: 0.9rem;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+}
+
+.run-details strong {
+  color: var(--text);
+}
+
+.run-tables {
+  font-size: 0.85rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.run-error {
+  color: var(--danger);
+  background: rgba(248, 81, 73, 0.1);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.runs-loading {
+  text-align: center;
+  color: #8b949e;
+  padding: 2rem;
+}
+
+.no-runs {
+  text-align: center;
+  color: #8b949e;
+  padding: 2rem;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #0f141b;
+}

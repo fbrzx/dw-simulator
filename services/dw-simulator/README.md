@@ -144,6 +144,49 @@ Content-Type: application/json
 ```
 Parses Redshift/Snowflake DDL and creates an experiment.
 
+**List generation runs**
+```
+GET /api/experiments/{name}/runs
+```
+Returns all generation runs for an experiment, most recent first.
+
+**Get specific generation run**
+```
+GET /api/experiments/{name}/runs/{run_id}
+```
+Returns detailed metadata for a specific run including status, timestamps, row counts, and errors.
+
+### Generation run tracking
+
+All data generation operations are automatically tracked in the `generation_runs` table:
+
+- Each run records its status (RUNNING, COMPLETED, FAILED, ABORTED)
+- Timestamps for start and completion
+- Row counts per table (stored as JSON)
+- Optional seed for reproducibility
+- Full error messages and tracebacks for failures
+- Concurrent run guards prevent simultaneous generation for the same experiment
+
+**Access run data via Python API:**
+```python
+from dw_simulator.service import ExperimentService
+
+service = ExperimentService()
+
+# List all runs for an experiment
+runs = service.persistence.list_generation_runs("my_experiment")
+
+# Get a specific run
+run = service.persistence.get_generation_run(run_id=1)
+print(f"Status: {run.status}, Rows: {run.row_counts}")
+```
+
+**Access via REST API:**
+- `GET /api/experiments/{name}/runs` - List all runs
+- `GET /api/experiments/{name}/runs/{run_id}` - Get specific run
+
+The web UI (services/web-ui) displays runs with real-time polling for live status updates.
+
 #### Running the API
 
 ```bash

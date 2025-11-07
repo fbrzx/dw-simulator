@@ -63,10 +63,12 @@ const renderExperiments = (experiments) => {
         <small>${experiment.table_count} table(s) · Created ${new Date(experiment.created_at).toLocaleString()}</small>
       </div>
       <div class="button-group">
+        <button class="secondary view-runs-btn" data-name="${experiment.name}">View Runs</button>
         <button class="secondary generate-btn" data-name="${experiment.name}">Generate</button>
         <button class="danger" data-name="${experiment.name}">Delete</button>
       </div>
     `;
+    item.querySelector('.view-runs-btn').addEventListener('click', () => openRunsModal(experiment.name));
     item.querySelector('.generate-btn').addEventListener('click', () => openGenerateModal(experiment.name));
     item.querySelector('.danger').addEventListener('click', () => deleteExperiment(experiment.name));
     experimentListEl.appendChild(item);
@@ -282,6 +284,122 @@ generateForm.addEventListener('submit', generateData);
 modal.addEventListener('click', (e) => {
   if (e.target === modal) {
     closeGenerateModal();
+  }
+});
+
+// Generation Runs Modal
+const runsModal = document.getElementById('runs-modal');
+const runsModalClose = runsModal.querySelector('.runs-modal-close');
+const runsExperimentNameEl = document.getElementById('runs-experiment-name');
+const runsListContainer = document.getElementById('runs-list-container');
+
+let currentRunsExperiment = null;
+let runsPollingInterval = null;
+
+const openRunsModal = async (name) => {
+  currentRunsExperiment = name;
+  runsExperimentNameEl.textContent = name;
+  runsModal.classList.remove('hidden');
+
+  // Load runs immediately
+  await loadGenerationRuns(name);
+
+  // Start polling for updates every 3 seconds
+  if (runsPollingInterval) {
+    clearInterval(runsPollingInterval);
+  }
+  runsPollingInterval = setInterval(() => loadGenerationRuns(name), 3000);
+};
+
+const closeRunsModal = () => {
+  runsModal.classList.add('hidden');
+  currentRunsExperiment = null;
+
+  // Stop polling
+  if (runsPollingInterval) {
+    clearInterval(runsPollingInterval);
+    runsPollingInterval = null;
+  }
+};
+
+const loadGenerationRuns = async (name) => {
+  try {
+    const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(name)}/runs`);
+    if (!response.ok) throw new Error('Failed to load generation runs');
+
+    const data = await response.json();
+    renderGenerationRuns(data.runs);
+  } catch (error) {
+    console.error(error);
+    runsListContainer.innerHTML = '<p class="runs-loading">Failed to load runs</p>';
+  }
+};
+
+const renderGenerationRuns = (runs) => {
+  if (!runs || runs.length === 0) {
+    runsListContainer.innerHTML = '<p class="no-runs">No generation runs yet. Click "Generate" to create one.</p>';
+    return;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'runs-list';
+
+  runs.forEach((run) => {
+    const item = document.createElement('li');
+    item.className = 'run-card';
+
+    // Parse row counts
+    let rowCountsDisplay = '';
+    try {
+      const rowCounts = JSON.parse(run.row_counts || '{}');
+      const entries = Object.entries(rowCounts);
+      if (entries.length > 0) {
+        rowCountsDisplay = `
+          <div class="run-tables">
+            <strong>Tables:</strong><br>
+            ${entries.map(([table, count]) => `${table}: ${count.toLocaleString()} rows`).join('<br>')}
+          </div>
+        `;
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+
+    // Format dates
+    const startedAt = new Date(run.started_at);
+    const completedAt = run.completed_at ? new Date(run.completed_at) : null;
+    const duration = completedAt
+      ? `${Math.round((completedAt - startedAt) / 1000)}s`
+      : 'In progress...';
+
+    item.innerHTML = `
+      <div class="run-header">
+        <span><strong>Run #${run.id}</strong></span>
+        <span class="run-status ${run.status}">${run.status}</span>
+      </div>
+      <div class="run-details">
+        <div><strong>Started:</strong> ${startedAt.toLocaleString()}</div>
+        ${completedAt ? `<div><strong>Completed:</strong> ${completedAt.toLocaleString()}</div>` : ''}
+        <div><strong>Duration:</strong> ${duration}</div>
+        ${run.seed !== null ? `<div><strong>Seed:</strong> ${run.seed}</div>` : ''}
+      </div>
+      ${rowCountsDisplay}
+      ${run.error_message ? `<div class="run-error"><strong>Error:</strong><br>${run.error_message}</div>` : ''}
+    `;
+
+    list.appendChild(item);
+  });
+
+  runsListContainer.innerHTML = '';
+  runsListContainer.appendChild(list);
+};
+
+runsModalClose.addEventListener('click', closeRunsModal);
+
+// Close runs modal on backdrop click
+runsModal.addEventListener('click', (e) => {
+  if (e.target === runsModal) {
+    closeRunsModal();
   }
 });
 
