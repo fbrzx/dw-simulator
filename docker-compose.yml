@@ -1,6 +1,33 @@
-version: "3.9"
-
 services:
+  # Test Runner - specialized service for CI/CD testing
+  test-runner:
+    build:
+      context: ./services/dw-simulator
+      dockerfile: Dockerfile.test
+    image: dw-simulator/test-runner:latest
+    environment:
+      PYTHONPATH: /app/src
+      DW_SIMULATOR_TARGET_DB_URL: "sqlite:////data/test.db"
+      DW_SIMULATOR_REDSHIFT_URL: "postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator"
+      DW_SIMULATOR_SNOWFLAKE_URL: "snowflake://test:test@local-snowflake-emulator:4566/test?account=test&warehouse=test"
+      DW_SIMULATOR_STAGE_BUCKET: "s3://local/dw-simulator/staging"
+      DW_SIMULATOR_DATA_ROOT: "/data"
+      AWS_ENDPOINT_URL: "http://local-s3-staging:4566"
+    volumes:
+      - ./data:/data
+      - ./services/dw-simulator/tests:/app/tests
+    depends_on:
+      local-s3-staging:
+        condition: service_started
+      local-redshift-mock:
+        condition: service_healthy
+      local-snowflake-emulator:
+        condition: service_started
+    networks:
+      - dw-sim-net
+    profiles:
+      - test
+
   synthetic-data-generator:
     build:
       context: ./services/dw-simulator

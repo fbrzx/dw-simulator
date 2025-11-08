@@ -129,14 +129,15 @@ def test_e2e_sqlite_ecommerce_workflow(tmp_sqlite_service: ExperimentService, tm
 
     create_result = service.create_experiment_from_payload(schema)
     assert create_result.success is True, f"Failed to create experiment: {create_result.errors}"
-    assert create_result.experiment is not None
-    assert create_result.experiment.name == "E2E_SQLite_Ecommerce"
+    assert create_result.metadata is not None
+    assert create_result.metadata.name == "E2E_SQLite_Ecommerce"
 
     # Step 2: Generate data (should auto-load into SQLite)
     output_dir = tmp_path / "output_sqlite"
     gen_result = service.generate_data("E2E_SQLite_Ecommerce", output_dir=output_dir, seed=12345)
     assert gen_result.success is True, f"Failed to generate data: {gen_result.errors}"
-    assert gen_result.run_id is not None
+    assert gen_result.run_metadata is not None
+    assert gen_result.run_metadata.id is not None
 
     # Step 3: Verify data was auto-loaded by querying tables
     # Check customer count

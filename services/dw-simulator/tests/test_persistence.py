@@ -859,7 +859,7 @@ def test_warehouse_url_priority_snowflake(tmp_path: Path, monkeypatch) -> None:
         persistence = ExperimentPersistence(connection_string=f"sqlite:///{db_path}")
 
         # Warehouse URL should be Snowflake URL
-        assert persistence.warehouse_url == snowflake_url
+        assert persistence.default_warehouse_url == snowflake_url
         # Verify create_engine was called with Snowflake URL
         assert any(call[0][0] == snowflake_url for call in mock_create_engine.call_args_list)
 
@@ -877,7 +877,7 @@ def test_warehouse_url_priority_redshift_over_snowflake(tmp_path: Path, monkeypa
     persistence = ExperimentPersistence(connection_string=f"sqlite:///{db_path}")
 
     # Warehouse URL should be Redshift URL (higher priority)
-    assert persistence.warehouse_url == redshift_url
+    assert persistence.default_warehouse_url == redshift_url
 
 
 def test_warehouse_url_explicit_override(tmp_path: Path, monkeypatch) -> None:
@@ -897,7 +897,7 @@ def test_warehouse_url_explicit_override(tmp_path: Path, monkeypatch) -> None:
     )
 
     # Warehouse URL should be explicit parameter (highest priority)
-    assert persistence.warehouse_url == explicit_url
+    assert persistence.default_warehouse_url == explicit_url
 
 
 def test_warehouse_dialect_detection_sqlite(tmp_path: Path) -> None:
@@ -938,7 +938,8 @@ def test_load_via_direct_insert_in_transaction(tmp_path: Path) -> None:
         rows_loaded = persistence._load_via_direct_insert_in_transaction(
             warehouse_conn=conn,
             physical_table=physical_table,
-            parquet_files=[parquet_path]
+            parquet_files=[parquet_path],
+            warehouse_engine=persistence.warehouse_engine
         )
 
     assert rows_loaded == 3

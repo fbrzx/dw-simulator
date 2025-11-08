@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - main
-      - 'claude/**'
   pull_request:
-    branches:
-      - main
+    # Run on all branches for pull requests
 
 env:
   # Docker Compose configuration
@@ -68,12 +66,12 @@ jobs:
           if-no-files-found: ignore
 
   # =============================================================================
-  # End-to-End Tests Job - Full stack with Docker Compose
+  # Full Test Suite - Uses Makefile for consistency
   # =============================================================================
-  e2e-tests:
-    name: E2E Tests (All Warehouses)
+  test-suite:
+    name: Full Test Suite (Unit + Integration + E2E)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout code
@@ -82,110 +80,27 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker images
+      - name: Run complete test suite via Makefile
         run: |
-          echo "Building synthetic-data-generator image..."
-          docker compose build synthetic-data-generator
-
-      - name: Start infrastructure services
-        run: |
-          echo "Starting all infrastructure services..."
-          docker compose up -d local-redshift-mock local-s3-staging local-snowflake-emulator
-
-          echo "Infrastructure services starting..."
-          docker compose ps
-
-      - name: Wait for PostgreSQL (Redshift emulator) to be healthy
-        run: |
-          echo "Waiting for PostgreSQL health check..."
-          timeout 90 bash -c 'until docker compose ps | grep -q "local-redshift-mock.*healthy"; do echo "Waiting for PostgreSQL..."; sleep 2; done'
-
-          echo "Verifying PostgreSQL accepts connections..."
-          timeout 30 bash -c 'until docker compose exec -T local-redshift-mock pg_isready -U dw_user -d dw_simulator; do sleep 1; done'
-
-          echo "✅ PostgreSQL is ready"
-
-      - name: Wait for LocalStack services (S3 + Snowflake)
-        run: |
-          echo "Waiting for LocalStack to be ready..."
-          sleep 5
-
-          echo "Checking S3 service..."
-          timeout 30 bash -c 'until curl -sf http://localhost:4572/_localstack/health >/dev/null 2>&1; do echo "Waiting for LocalStack..."; sleep 2; done' || echo "LocalStack health check timeout (may be normal)"
-
-          echo "✅ LocalStack services initialized"
-
-      - name: Verify all infrastructure is ready
-        run: |
-          echo "=== Infrastructure Status ==="
-          docker compose ps
-          echo ""
-          echo "=== PostgreSQL Status ==="
-          docker compose exec -T local-redshift-mock pg_isready -U dw_user -d dw_simulator
-          echo ""
-          echo "✅ All infrastructure services are ready for testing"
-
-      # NOTE: Tests run sequentially to avoid database conflicts.
-      # Infrastructure is fully ready at this point, so tests can safely execute.
-      # Future optimization: Use pytest-xdist for parallel execution within a single test run.
-
-      - name: Run E2E test - SQLite warehouse
-        run: |
-          echo "Running SQLite end-to-end test..."
-          docker compose run --rm \
-            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:////data/e2e_sqlite.db" \
-            synthetic-data-generator \
-            pytest -v --tb=short -o addopts="" -p no:cov \
-            tests/test_e2e_warehouses.py::test_e2e_sqlite_ecommerce_workflow
-
-      - name: Run E2E test - Redshift (PostgreSQL) warehouse
-        run: |
-          echo "Running Redshift (PostgreSQL) end-to-end test..."
-          docker compose run --rm \
-            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:///:memory:" \
-            -e DW_SIMULATOR_REDSHIFT_URL="postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator" \
-            synthetic-data-generator \
-            pytest -v --tb=short -o addopts="" -p no:cov \
-            -m integration \
-            tests/test_e2e_warehouses.py::test_e2e_redshift_analytics_workflow
-
-      - name: Run E2E test - Snowflake warehouse
-        run: |
-          echo "Running Snowflake end-to-end test..."
-          docker compose run --rm \
-            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:///:memory:" \
-            -e DW_SIMULATOR_SNOWFLAKE_URL="snowflake://test:test@local-snowflake-emulator:4566/test?account=test&warehouse=test" \
-            synthetic-data-generator \
-            pytest -v --tb=short -o addopts="" -p no:cov \
-            -m integration \
-            tests/test_e2e_warehouses.py::test_e2e_snowflake_sales_workflow
-
-      - name: Run all integration tests
-        run: |
-          echo "Running full integration test suite..."
-          docker compose run --rm \
-            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:////data/integration_all.db" \
-            synthetic-data-generator \
-            pytest -v --tb=short -o addopts="" -p no:cov \
-            tests/test_integration.py
+          echo "Running complete test suite using make test-runner-all..."
+          echo "This includes: unit tests, integration tests, and E2E tests"
+          make test-runner-all
 
       - name: Show service logs on failure
         if: failure()
         run: |
           echo "=== PostgreSQL Logs ==="
-          docker compose logs local-redshift-mock | tail -100
+          docker compose logs local-redshift-mock | tail -100 || echo "No PostgreSQL logs available"
           echo ""
           echo "=== LocalStack S3 Logs ==="
-          docker compose logs local-s3-staging | tail -100
+          docker compose logs local-s3-staging | tail -100 || echo "No S3 logs available"
           echo ""
           echo "=== LocalStack Snowflake Logs ==="
-          docker compose logs local-snowflake-emulator | tail -100
+          docker compose logs local-snowflake-emulator | tail -100 || echo "No Snowflake logs available"
 
       - name: Cleanup Docker resources
         if: always()
-        run: |
-          docker compose down -v
-          docker compose rm -f
+        run: make test-runner-down
 
   # =============================================================================
   # Build Validation Job - Ensure Docker images build successfully
@@ -202,15 +117,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build all services
+      - name: Build all services (including test-runner)
         run: |
           echo "Building all Docker services..."
-          docker compose build --parallel
+          docker compose build synthetic-data-generator test-runner
 
       - name: Verify images were created
         run: |
           echo "Verifying Docker images..."
-          docker images | grep -E "dw-simulator|postgres|localstack"
+          docker images | grep -E "dw-simulator"
 
       - name: Test basic container startup
         run: |
@@ -226,21 +141,21 @@ jobs:
   ci-status:
     name: CI Status Check
     runs-on: ubuntu-latest
-    needs: [unit-tests, e2e-tests, build-validation]
+    needs: [unit-tests, test-suite, build-validation]
     if: always()
 
     steps:
       - name: Check all jobs status
         run: |
           if [[ "${{ needs.unit-tests.result }}" == "success" ]] && \
-             [[ "${{ needs.e2e-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.test-suite.result }}" == "success" ]] && \
              [[ "${{ needs.build-validation.result }}" == "success" ]]; then
             echo "✅ All CI checks passed!"
             exit 0
           else
             echo "❌ CI checks failed:"
             echo "  - Unit Tests: ${{ needs.unit-tests.result }}"
-            echo "  - E2E Tests: ${{ needs.e2e-tests.result }}"
+            echo "  - Full Test Suite: ${{ needs.test-suite.result }}"
             echo "  - Build Validation: ${{ needs.build-validation.result }}"
             exit 1
           fi
