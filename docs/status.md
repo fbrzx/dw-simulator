@@ -65,6 +65,7 @@ Enable users to execute SQL queries against populated experiments and export res
 3. **Query saving (US 3.3 - ✅ complete):** Implemented `dw-sim query save` command to save SQL query text to `.sql` files.
 4. **Comprehensive testing (✅ complete):** Added 9 new tests across persistence, service layers covering all acceptance criteria including query execution, error handling, CSV export, and query saving.
 5. **Documentation (✅ complete):** Updated README.md with comprehensive query examples for CLI and API usage.
+6. **Query rewriting & SQL Query tab helpers (Phase 1-2 – ✅ complete):** Added `services/dw_simulator/query_rewriter.py` so `ExperimentPersistence.execute_query()` rewrites logical table names to experiment-prefixed tables via `sqlglot`, and surfaced the same table metadata in the Web UI’s SQL Query tab so users see available tables and get Ctrl+Space/table-type autocomplete hints. Backed by focused rewriter tests covering multi-statement SQL, CTEs, schema-qualified names, and alias preservation.
 
 ### US 4.1 – Data generation rules for columns (✅ COMPLETE)
 Enable users to define data generation rules for columns to produce realistic, constrained synthetic data.
