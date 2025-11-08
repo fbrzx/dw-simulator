@@ -55,6 +55,14 @@ class DataType(str):
     FLOAT = "FLOAT"
 
 
+class WarehouseType(str):
+    """Supported warehouse types for experiment targeting."""
+
+    SQLITE = "sqlite"
+    REDSHIFT = "redshift"
+    SNOWFLAKE = "snowflake"
+
+
 class ColumnSchema(BaseModel):
     """Column definition with optional constraints for generation."""
 
@@ -171,11 +179,27 @@ class ExperimentSchema(BaseModel):
     name: str = Field(..., description="Experiment identifier.")
     description: str | None = Field(default=None)
     tables: Sequence[TableSchema] = Field(..., min_length=1)
+    target_warehouse: str | None = Field(
+        default=None,
+        description="Target warehouse type (sqlite/redshift/snowflake). If not specified, uses system default."
+    )
 
     @field_validator("name")
     @classmethod
     def validate_experiment_name(cls, value: str) -> str:
         return _validate_identifier(value)
+
+    @field_validator("target_warehouse")
+    @classmethod
+    def validate_target_warehouse(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower()
+        if normalized not in {WarehouseType.SQLITE, WarehouseType.REDSHIFT, WarehouseType.SNOWFLAKE}:
+            raise ValueError(
+                f"Unsupported warehouse type '{value}'. Must be one of: sqlite, redshift, snowflake."
+            )
+        return normalized
 
     def total_rows(self) -> int:
         return sum(table.target_rows for table in self.tables)
@@ -234,4 +258,5 @@ __all__ = [
     "parse_experiment_schema",
     "validate_experiment_payload",
     "DataType",
+    "WarehouseType",
 ]

@@ -36,7 +36,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from .config import get_target_db_url, get_redshift_url, get_snowflake_url
-from .schema import ColumnSchema, DataType, ExperimentSchema
+from .schema import ColumnSchema, DataType, ExperimentSchema, WarehouseType
 from .s3_client import upload_parquet_files_to_s3, S3UploadError
 
 import pyarrow.parquet as pq
@@ -86,6 +86,7 @@ class ExperimentMetadata:
     description: str | None
     schema_json: str
     created_at: datetime
+    warehouse_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,21 +136,41 @@ class ExperimentPersistence:
         self.connection_string = connection_string or get_target_db_url()
         self.engine: Engine = create_engine(self.connection_string, future=True)
 
-        # Warehouse database (PostgreSQL/Redshift/Snowflake) - stores actual data tables
-        # Falls back to metadata DB (SQLite) if not configured (for testing/local development)
-        # Priority: explicit warehouse_url > Redshift URL > Snowflake URL > metadata DB
+        # Initialize warehouse engines for each supported warehouse type
+        # These will be used based on per-experiment warehouse selection
+        self._warehouse_engines: dict[str, Engine] = {}
+
+        # SQLite warehouse (always available, same as metadata DB)
+        self._warehouse_engines[WarehouseType.SQLITE] = self.engine
+
+        # Redshift warehouse (PostgreSQL-based emulator)
+        redshift_url = get_redshift_url()
+        if redshift_url:
+            self._warehouse_engines[WarehouseType.REDSHIFT] = create_engine(redshift_url, future=True)
+
+        # Snowflake warehouse (LocalStack emulator)
+        snowflake_url = get_snowflake_url()
+        if snowflake_url:
+            self._warehouse_engines[WarehouseType.SNOWFLAKE] = create_engine(snowflake_url, future=True)
+
+        # Legacy: maintain backward compatibility with warehouse_url parameter
+        # This is used as the default when no target_warehouse is specified
         if warehouse_url is not None:
-            self.warehouse_url = warehouse_url
+            self.default_warehouse_url = warehouse_url
         else:
-            redshift_url = get_redshift_url()
-            snowflake_url = get_snowflake_url()
+            # Priority: Redshift > Snowflake > SQLite
             if redshift_url is not None:
-                self.warehouse_url = redshift_url
+                self.default_warehouse_url = redshift_url
+                self.default_warehouse_type = WarehouseType.REDSHIFT
             elif snowflake_url is not None:
-                self.warehouse_url = snowflake_url
+                self.default_warehouse_url = snowflake_url
+                self.default_warehouse_type = WarehouseType.SNOWFLAKE
             else:
-                self.warehouse_url = self.connection_string  # Use same as metadata DB
-        self.warehouse_engine: Engine = create_engine(self.warehouse_url, future=True)
+                self.default_warehouse_url = self.connection_string
+                self.default_warehouse_type = WarehouseType.SQLITE
+
+        # Create default warehouse engine (for backward compatibility)
+        self.warehouse_engine: Engine = create_engine(self.default_warehouse_url, future=True)
 
         self._metadata = MetaData()
         self._experiments = Table(
@@ -160,6 +181,7 @@ class ExperimentPersistence:
             Column("description", Text),
             Column("schema_json", Text, nullable=False),
             Column("created_at", String(32), nullable=False),
+            Column("warehouse_type", String(32), nullable=True),  # sqlite/redshift/snowflake
         )
         self._experiment_tables = Table(
             "experiment_tables",
@@ -185,6 +207,48 @@ class ExperimentPersistence:
         )
         self._metadata.create_all(self.engine)
 
+    # Warehouse engine routing ---------------------------------------------------
+
+    def _get_warehouse_engine_for_experiment(self, experiment_name: str) -> Engine:
+        """Get the appropriate warehouse engine for a specific experiment.
+
+        Returns the warehouse engine based on the experiment's target_warehouse setting.
+        Falls back to default warehouse if not specified.
+        """
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(self._experiments.c.warehouse_type).where(
+                    self._experiments.c.name == experiment_name
+                )
+            ).first()
+
+            if not row:
+                raise ExperimentNotFoundError(f"Experiment '{experiment_name}' does not exist.")
+
+            warehouse_type = row.warehouse_type
+
+        # If experiment has a specific warehouse type, use that engine
+        if warehouse_type and warehouse_type in self._warehouse_engines:
+            return self._warehouse_engines[warehouse_type]
+
+        # Otherwise use default warehouse engine
+        return self.warehouse_engine
+
+    def _get_warehouse_type_from_schema(self, schema: ExperimentSchema) -> str:
+        """Determine warehouse type from schema, falling back to default."""
+        if schema.target_warehouse:
+            # Validate that the requested warehouse is available
+            if schema.target_warehouse not in self._warehouse_engines:
+                available = ", ".join(self._warehouse_engines.keys())
+                raise ValueError(
+                    f"Warehouse '{schema.target_warehouse}' is not configured. "
+                    f"Available warehouses: {available}"
+                )
+            return schema.target_warehouse
+
+        # Use default warehouse type
+        return self.default_warehouse_type
+
     # Public API -----------------------------------------------------------------
 
     def create_experiment(self, schema: ExperimentSchema) -> ExperimentMetadata:
@@ -203,12 +267,14 @@ class ExperimentPersistence:
 
                 created_at = datetime.now(timezone.utc).isoformat()
                 schema_json = schema.model_dump_json()
+                warehouse_type = self._get_warehouse_type_from_schema(schema)
                 conn.execute(
                     self._experiments.insert().values(
                         name=schema.name,
                         description=schema.description,
                         schema_json=schema_json,
                         created_at=created_at,
+                        warehouse_type=warehouse_type,
                     )
                 )
                 for table_schema in schema.tables:
@@ -248,6 +314,7 @@ class ExperimentPersistence:
             description=schema.description,
             schema_json=schema_json,
             created_at=datetime.fromisoformat(created_at),
+            warehouse_type=self._get_warehouse_type_from_schema(schema),
         )
 
     def get_experiment_metadata(self, name: str) -> ExperimentMetadata | None:
@@ -260,6 +327,7 @@ class ExperimentPersistence:
                     self._experiments.c.description,
                     self._experiments.c.schema_json,
                     self._experiments.c.created_at,
+                    self._experiments.c.warehouse_type,
                 ).where(self._experiments.c.name == name)
             ).first()
 
@@ -270,6 +338,7 @@ class ExperimentPersistence:
             description=row.description,
             schema_json=row.schema_json,
             created_at=datetime.fromisoformat(row.created_at),
+            warehouse_type=row.warehouse_type,
         )
 
     def list_tables(self, experiment_name: str) -> list[str]:
@@ -290,6 +359,7 @@ class ExperimentPersistence:
                     self._experiments.c.description,
                     self._experiments.c.schema_json,
                     self._experiments.c.created_at,
+                    self._experiments.c.warehouse_type,
                 ).order_by(self._experiments.c.created_at.desc())
             ).all()
 
@@ -299,6 +369,7 @@ class ExperimentPersistence:
                 description=row.description,
                 schema_json=row.schema_json,
                 created_at=datetime.fromisoformat(row.created_at),
+                warehouse_type=row.warehouse_type,
             )
             for row in rows
         ]
@@ -324,10 +395,13 @@ class ExperimentPersistence:
                     self._physical_table_name(name, row.table_name) for row in table_rows
                 ]
 
+                # Get the appropriate warehouse engine for this experiment
+                warehouse_engine = self._get_warehouse_engine_for_experiment(name)
+
                 # Drop physical tables from warehouse database
-                inspector = inspect(self.warehouse_engine)
+                inspector = inspect(warehouse_engine)
                 dropped = 0
-                with self.warehouse_engine.begin() as warehouse_conn:
+                with warehouse_engine.begin() as warehouse_conn:
                     for table_name in physical_tables:
                         if inspector.has_table(table_name):
                             warehouse_conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{table_name}"')
@@ -551,10 +625,13 @@ class ExperimentPersistence:
                     self._physical_table_name(name, row.table_name) for row in table_rows
                 ]
 
+            # Get the appropriate warehouse engine for this experiment
+            warehouse_engine = self._get_warehouse_engine_for_experiment(name)
+
             # Truncate tables in warehouse database
-            inspector = inspect(self.warehouse_engine)
+            inspector = inspect(warehouse_engine)
             reset_count = 0
-            with self.warehouse_engine.begin() as warehouse_conn:
+            with warehouse_engine.begin() as warehouse_conn:
                 for table_name in physical_tables:
                     if inspector.has_table(table_name):
                         warehouse_conn.exec_driver_sql(f'DELETE FROM "{table_name}"')
@@ -569,17 +646,24 @@ class ExperimentPersistence:
 
     def execute_query(self, sql: str, experiment_name: str | None = None) -> QueryResult:
         """
-        Execute a SQL query against the warehouse database (Redshift/PostgreSQL).
+        Execute a SQL query against the warehouse database (Redshift/PostgreSQL/Snowflake).
 
         If experiment_name is provided, creates temporary views that map simple table names
         to the physical experiment__table names, allowing queries like "SELECT * FROM customers"
-        instead of "SELECT * FROM experiment__customers".
+        instead of "SELECT * FROM experiment__customers". Also routes to the experiment's
+        target warehouse.
 
         Raises QueryExecutionError if the query fails.
         """
+        # Get the appropriate warehouse engine
+        if experiment_name:
+            warehouse_engine = self._get_warehouse_engine_for_experiment(experiment_name)
+        else:
+            warehouse_engine = self.warehouse_engine
+
         try:
             # Execute query against warehouse database (where actual data lives)
-            with self.warehouse_engine.connect() as conn:
+            with warehouse_engine.connect() as conn:
                 # If experiment is specified, create temporary views for easier querying
                 if experiment_name:
                     # Get the list of tables for this experiment
@@ -672,8 +756,11 @@ class ExperimentPersistence:
             # Load data into warehouse database (Redshift/PostgreSQL/Snowflake)
             physical_table = self._physical_table_name(experiment_name, table_name)
 
+            # Get the appropriate warehouse engine for this experiment
+            warehouse_engine = self._get_warehouse_engine_for_experiment(experiment_name)
+
             # Detect warehouse type and use appropriate loading strategy
-            dialect_name = self.warehouse_engine.dialect.name
+            dialect_name = warehouse_engine.dialect.name
 
             if dialect_name == 'postgresql':
                 # PostgreSQL/Redshift: Use S3 + COPY FROM (via direct INSERT fallback)
@@ -682,7 +769,8 @@ class ExperimentPersistence:
                     table_name=table_name,
                     physical_table=physical_table,
                     parquet_files=paths,
-                    run_id=run_id
+                    run_id=run_id,
+                    warehouse_engine=warehouse_engine
                 )
             elif dialect_name == 'snowflake':
                 # Snowflake: Use S3 + COPY INTO
@@ -691,13 +779,15 @@ class ExperimentPersistence:
                     table_name=table_name,
                     physical_table=physical_table,
                     parquet_files=paths,
-                    run_id=run_id
+                    run_id=run_id,
+                    warehouse_engine=warehouse_engine
                 )
             else:
                 # SQLite: Use direct INSERT
                 return self._load_via_direct_insert(
                     physical_table=physical_table,
-                    parquet_files=paths
+                    parquet_files=paths,
+                    warehouse_engine=warehouse_engine
                 )
         except (ExperimentNotFoundError, DataLoadError):
             raise
@@ -713,6 +803,7 @@ class ExperimentPersistence:
         physical_table: str,
         parquet_files: list[Path],
         run_id: int | None,
+        warehouse_engine: Engine,
     ) -> int:
         """
         Load Parquet files using S3 + PostgreSQL COPY FROM (Redshift emulation).
@@ -737,8 +828,8 @@ class ExperimentPersistence:
             ) from exc
 
         # Clear existing data
-        with self.warehouse_engine.begin() as warehouse_conn:
-            inspector = inspect(self.warehouse_engine)
+        with warehouse_engine.begin() as warehouse_conn:
+            inspector = inspect(warehouse_engine)
             if not inspector.has_table(physical_table):
                 raise DataLoadError(
                     f"Physical table '{physical_table}' does not exist in the warehouse."
@@ -757,7 +848,7 @@ class ExperimentPersistence:
             # This is a limitation of the emulation environment.
 
             total_rows = 0
-            target_table = Table(physical_table, MetaData(), autoload_with=self.warehouse_engine)
+            target_table = Table(physical_table, MetaData(), autoload_with=warehouse_engine)
 
             for file_path in parquet_files:
                 try:
@@ -789,6 +880,7 @@ class ExperimentPersistence:
         physical_table: str,
         parquet_files: list[Path],
         run_id: int | None,
+        warehouse_engine: Engine,
     ) -> int:
         """
         Load Parquet files using S3 + Snowflake COPY INTO command.
@@ -822,8 +914,8 @@ class ExperimentPersistence:
             ) from exc
 
         # Clear existing data and load from S3 using Snowflake COPY INTO
-        with self.warehouse_engine.begin() as warehouse_conn:
-            inspector = inspect(self.warehouse_engine)
+        with warehouse_engine.begin() as warehouse_conn:
+            inspector = inspect(warehouse_engine)
             if not inspector.has_table(physical_table):
                 raise DataLoadError(
                     f"Physical table '{physical_table}' does not exist in the warehouse."
@@ -872,7 +964,8 @@ class ExperimentPersistence:
                     return self._load_via_direct_insert_in_transaction(
                         warehouse_conn=warehouse_conn,
                         physical_table=physical_table,
-                        parquet_files=parquet_files
+                        parquet_files=parquet_files,
+                        warehouse_engine=warehouse_engine
                     )
 
             # Count total rows loaded
@@ -889,13 +982,14 @@ class ExperimentPersistence:
         warehouse_conn: Connection,
         physical_table: str,
         parquet_files: list[Path],
+        warehouse_engine: Engine,
     ) -> int:
         """
         Load Parquet files using direct INSERT statements within an existing transaction.
 
         This is a helper method used as a fallback when COPY commands fail.
         """
-        target_table = Table(physical_table, MetaData(), autoload_with=self.warehouse_engine)
+        target_table = Table(physical_table, MetaData(), autoload_with=warehouse_engine)
 
         total_rows = 0
         for file_path in parquet_files:
@@ -925,20 +1019,21 @@ class ExperimentPersistence:
         self,
         physical_table: str,
         parquet_files: list[Path],
+        warehouse_engine: Engine,
     ) -> int:
         """
         Load Parquet files using direct INSERT statements (SQLite fallback).
 
         Returns the total number of rows loaded.
         """
-        with self.warehouse_engine.begin() as warehouse_conn:
-            inspector = inspect(self.warehouse_engine)
+        with warehouse_engine.begin() as warehouse_conn:
+            inspector = inspect(warehouse_engine)
             if not inspector.has_table(physical_table):
                 raise DataLoadError(
                     f"Physical table '{physical_table}' does not exist in the warehouse."
                 )
 
-            target_table = Table(physical_table, MetaData(), autoload_with=self.warehouse_engine)
+            target_table = Table(physical_table, MetaData(), autoload_with=warehouse_engine)
             # Replace existing contents to mirror the latest Parquet export.
             warehouse_conn.execute(target_table.delete())
 
@@ -1060,10 +1155,14 @@ class ExperimentPersistence:
 
     def _create_data_tables(self, schema: ExperimentSchema) -> None:
         """
-        Create physical data tables in the warehouse database (PostgreSQL/Redshift).
-        Uses a separate transaction on warehouse_engine.
+        Create physical data tables in the warehouse database (PostgreSQL/Redshift/Snowflake).
+        Uses a separate transaction on the appropriate warehouse engine based on experiment's target_warehouse.
         """
-        inspector = inspect(self.warehouse_engine)
+        # Get the appropriate warehouse engine for this experiment
+        warehouse_type = self._get_warehouse_type_from_schema(schema)
+        warehouse_engine = self._warehouse_engines.get(warehouse_type, self.warehouse_engine)
+
+        inspector = inspect(warehouse_engine)
         for table_schema in schema.tables:
             table_name = self._physical_table_name(schema.name, table_schema.name)
             if inspector.has_table(table_name):
@@ -1084,8 +1183,8 @@ class ExperimentPersistence:
                 for column_schema in table_schema.columns
             ]
             Table(table_name, metadata, *columns)
-            # Create table in warehouse database (Redshift/PostgreSQL)
-            metadata.create_all(self.warehouse_engine)
+            # Create table in the experiment's target warehouse database
+            metadata.create_all(warehouse_engine)
 
     @staticmethod
     def _physical_table_name(experiment_name: str, table_name: str) -> str:
