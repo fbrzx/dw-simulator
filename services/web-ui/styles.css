@@ -2,8 +2,17 @@
   --bg: #0d1117;
   --panel-bg: #161b22;
   --text: #f0f3f8;
+  --muted: #8b949e;
   --accent: #2f81f7;
   --danger: #f85149;
+  --success: #2da44e;
+  --warning: #fbb347;
+  --space-xxs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
 }
 
 * {
@@ -16,39 +25,41 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  line-height: 1.5;
 }
 
 .page-shell {
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 2rem 2.5rem;
+  padding: var(--space-xl) var(--space-lg) var(--space-xl);
 }
 
 header {
-  padding: 2rem 0 1.5rem;
+  padding: 0 0 var(--space-lg);
   border-bottom: 1px solid #21262d;
+  margin-bottom: var(--space-lg);
 }
 
 main {
   padding: 0;
-  margin-top: 1.5rem;
+  margin-top: var(--space-lg);
 }
 
 /* Main tabs */
 .main-tabs {
   display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
   border-bottom: 2px solid #21262d;
-  padding-bottom: 0.5rem;
+  padding-bottom: var(--space-xs);
 }
 
 .main-tab {
   background: transparent;
   border: none;
-  color: #8b949e;
-  padding: 0.6rem 1.25rem;
+  color: var(--muted);
+  padding: var(--space-xs) var(--space-md);
   border-radius: 8px 8px 0 0;
   font-weight: 600;
   font-size: 0.95rem;
@@ -109,7 +120,7 @@ main {
   background: var(--panel-bg);
   border: 1px solid #21262d;
   border-radius: 12px;
-  padding: 1rem 1.25rem;
+  padding: var(--space-lg);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
 }
 
@@ -117,14 +128,14 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--space-md);
 }
 
 button {
   background: var(--accent);
   border: none;
   color: white;
-  padding: 0.5rem 1rem;
+  padding: var(--space-xs) var(--space-md);
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
@@ -142,7 +153,7 @@ textarea {
   width: 100%;
   border-radius: 8px;
   border: 1px solid #30363d;
-  padding: 0.75rem;
+  padding: var(--space-sm);
   background: #0d1117;
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -153,23 +164,23 @@ select {
   width: 100%;
   border-radius: 8px;
   border: 1px solid #30363d;
-  padding: 0.65rem;
+  padding: var(--space-xs) var(--space-sm);
   background: #0d1117;
   color: var(--text);
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--space-sm);
 }
 
 label {
   display: block;
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-xs);
   font-weight: 600;
 }
 
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
 }
 
 .form-field {
@@ -184,21 +195,48 @@ label {
 .actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 0.75rem;
+  margin-top: var(--space-sm);
+  gap: var(--space-sm);
 }
 
-#status {
-  min-height: 1.5rem;
-  margin-bottom: 0.5rem;
+.status-message {
+  display: none;
+  margin-bottom: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 10px;
+  border: 1px solid transparent;
   font-size: 0.95rem;
+  background: transparent;
+}
+
+.status-message.is-visible {
+  display: block;
+}
+
+.status-message.info {
+  background: rgba(47, 129, 247, 0.12);
+  border-color: rgba(47, 129, 247, 0.4);
+  color: #58a6ff;
+}
+
+.status-message.success {
+  background: rgba(45, 164, 78, 0.12);
+  border-color: rgba(45, 164, 78, 0.35);
+  color: var(--success);
+}
+
+.status-message.error {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: var(--danger);
 }
 
 .warning-banner {
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-  padding: 0.75rem 1rem;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid rgba(250, 204, 21, 0.5);
   border-radius: 10px;
   background: rgba(250, 204, 21, 0.12);
@@ -225,8 +263,8 @@ label {
 
 .mode-tabs {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
 }
 
 .mode-tab {
@@ -253,17 +291,18 @@ label {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-sm);
 }
 
 .experiment-card {
   border: 1px solid #30363d;
-  border-radius: 10px;
-  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  padding: var(--space-md);
   display: flex;
   justify-content: space-between;
   align-items: center;
   background: #0f141b;
+  gap: var(--space-sm);
 }
 
 .experiment-info {
@@ -354,7 +393,7 @@ pre {
   background: var(--panel-bg);
   border: 1px solid #21262d;
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: var(--space-lg);
   max-width: 500px;
   width: 90%;
   max-height: 80vh;
@@ -384,8 +423,8 @@ pre {
 }
 
 .table-override {
-  margin-bottom: 1rem;
-  padding: 0.75rem;
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm);
   background: #0f141b;
   border: 1px solid #30363d;
   border-radius: 8px;
@@ -440,7 +479,9 @@ button.cancel-btn {
 
 .button-group {
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  justify-content: flex-end;
 }
 
 /* Generation runs styles */
@@ -454,14 +495,17 @@ button.cancel-btn {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-sm);
 }
 
 .run-card {
   border: 1px solid #30363d;
-  border-radius: 10px;
-  padding: 1rem;
+  border-radius: 12px;
+  padding: var(--space-md);
   background: #0f141b;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
 }
 
 .run-header {
@@ -500,8 +544,10 @@ button.cancel-btn {
 
 .run-details {
   font-size: 0.9rem;
-  color: #8b949e;
-  margin-bottom: 0.5rem;
+  color: var(--muted);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-xs);
 }
 
 .run-details strong {
@@ -512,18 +558,19 @@ button.cancel-btn {
   font-size: 0.85rem;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  margin-top: 0.5rem;
+  border-radius: 8px;
+  padding: var(--space-sm);
+  margin-top: var(--space-xs);
+  line-height: 1.4;
 }
 
 .run-error {
   color: var(--danger);
   background: rgba(248, 81, 73, 0.1);
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  padding: var(--space-sm);
+  border-radius: 8px;
   font-size: 0.85rem;
-  margin-top: 0.5rem;
+  margin-top: var(--space-xs);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   white-space: pre-wrap;
   word-break: break-word;

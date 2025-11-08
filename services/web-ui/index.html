@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DW Simulator – Experiments</title>
+    <title>Data Warehouse Simulator</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="page-shell">
       <header>
-        <h1>DW Simulator Control Panel</h1>
+        <h1>Data Warehouse Simulator</h1>
         <p>Manage experiment schemas locally via the Python API.</p>
       </header>
 
@@ -18,7 +18,7 @@
         <div class="main-tabs">
           <button type="button" class="main-tab active" data-tab="experiments">Experiments</button>
           <button type="button" class="main-tab" data-tab="create">Create Experiment</button>
-          <button type="button" class="main-tab" data-tab="query">SQL Query</button>
+          <button type="button" class="main-tab" data-tab="query">Query Data</button>
         </div>
 
         <!-- Tab Content -->
@@ -36,7 +36,7 @@
                 role="alert"
                 aria-live="polite"
               ></div>
-              <div id="status" role="status" aria-live="polite"></div>
+              <div id="status" class="status-message" role="status" aria-live="polite"></div>
               <ul id="experiment-list" class="experiment-list"></ul>
             </div>
           </section>
@@ -59,48 +59,16 @@
               <form id="json-form">
                 <label for="json-warehouse-select">Target Warehouse</label>
                 <select id="json-warehouse-select">
-                  <option value="">Default (priority: Redshift > Snowflake > SQLite)</option>
-                  <option value="sqlite">SQLite</option>
+                  <option value="">Default</option>
                   <option value="redshift">Redshift (PostgreSQL emulator)</option>
                   <option value="snowflake">Snowflake (LocalStack emulator)</option>
+                  <option value="sqlite">SQLite</option>
                 </select>
-                <label for="schema-input">Paste experiment JSON schema</label>
+                <label for="schema-input">Experiment JSON schema</label>
                 <textarea id="schema-input" rows="12" required></textarea>
                 <div class="actions">
                   <button type="submit">Create Experiment</button>
                 </div>
-              </form>
-
-              <form id="sql-form" class="hidden">
-                <label for="sql-experiment-name">Experiment name</label>
-                <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
-
-                <div class="form-row">
-                  <div class="form-field">
-                    <label for="dialect-select">SQL Dialect</label>
-                    <select id="dialect-select">
-                      <option value="redshift">Amazon Redshift</option>
-                      <option value="snowflake">Snowflake</option>
-                      <option value="ansi">ANSI</option>
-                    </select>
-                  </div>
-                  <div class="form-field">
-                    <label for="warehouse-select">Target Warehouse</label>
-                    <select id="warehouse-select">
-                      <option value="">Default (priority: Redshift > Snowflake > SQLite)</option>
-                      <option value="sqlite">SQLite</option>
-                      <option value="redshift">Redshift (PostgreSQL emulator)</option>
-                      <option value="snowflake">Snowflake (LocalStack emulator)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <label for="sql-input">Paste SQL (CREATE TABLE ...)</label>
-                <textarea id="sql-input" rows="12" required></textarea>
-                <div class="actions">
-                  <button type="submit">Import SQL</button>
-                </div>
-              </form>
 
               <details>
                 <summary>Sample JSON schema</summary>
@@ -126,6 +94,39 @@
   ]
 }</pre>
               </details>
+              </form>
+
+              <form id="sql-form" class="hidden">
+                <label for="sql-experiment-name">Experiment name</label>
+                <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
+
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="dialect-select">SQL Dialect</label>
+                    <select id="dialect-select">
+                      <option value="redshift">Amazon Redshift</option>
+                      <option value="snowflake">Snowflake</option>
+                      <option value="ansi">ANSI</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label for="warehouse-select">Target Warehouse</label>
+                    <select id="warehouse-select">
+                      <option value="">Default</option>
+                      <option value="redshift">Redshift (PostgreSQL emulator)</option>
+                      <option value="snowflake">Snowflake (LocalStack emulator)</option>
+                      <option value="sqlite">SQLite</option>
+                    </select>
+                  </div>
+                </div>
+
+                <label for="sql-input">SQL (CREATE TABLE ...)</label>
+                <textarea id="sql-input" rows="12" required></textarea>
+                <div class="actions">
+                  <button type="submit">Import SQL</button>
+                </div>
+              </form>
+
             </div>
           </section>
 

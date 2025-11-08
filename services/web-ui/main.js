@@ -37,8 +37,16 @@ mainTabs.forEach((tab) => {
 
 const setStatus = (message, type = 'info') => {
   if (!statusEl) return;
+  const baseClass = 'status-message';
+
+  if (!message) {
+    statusEl.textContent = '';
+    statusEl.className = baseClass;
+    return;
+  }
+
   statusEl.textContent = message;
-  statusEl.className = type;
+  statusEl.className = `${baseClass} ${type} is-visible`;
 };
 
 const renderWarningBanner = (warnings, banner = warningBanner) => {
@@ -122,7 +130,7 @@ const updateQueryTabState = (experiments) => {
 };
 
 const fetchExperiments = async () => {
-  setStatus('Loading experiments...');
+  setStatus('Loading experiments…');
   clearWarningBanner();  // Clear warnings when refreshing
   try {
     const response = await fetch(`${API_BASE}/experiments`);
@@ -132,10 +140,11 @@ const fetchExperiments = async () => {
     renderExperiments(experiments);
     populateExperimentSelector(experiments);
     updateQueryTabState(experiments);
-    setStatus(`Loaded ${experiments.length} experiment(s).`);
+    const label = experiments.length === 1 ? 'experiment' : 'experiments';
+    setStatus(`Loaded ${experiments.length} ${label}.`, 'success');
   } catch (error) {
     console.error(error);
-    setStatus(error.message, 'error');
+    setStatus(error.message || 'Failed to load experiments.', 'error');
   }
 };
 
@@ -250,7 +259,7 @@ const createExperimentFromJson = async (event) => {
   try {
     payload = JSON.parse(schemaInput.value);
   } catch (error) {
-    setStatus('Invalid JSON payload.', 'error');
+    setStatus('Invalid JSON payload. Please fix the syntax and try again.', 'error');
     return;
   }
 
@@ -260,7 +269,7 @@ const createExperimentFromJson = async (event) => {
     payload.target_warehouse = jsonWarehouseSelect.value;
   }
 
-  setStatus('Creating experiment...');
+  setStatus('Creating experiment…');
   try {
     const response = await fetch(`${API_BASE}/experiments`, {
       method: 'POST',
@@ -272,11 +281,11 @@ const createExperimentFromJson = async (event) => {
       throw new Error((errorBody.detail || []).join(' '));
     }
     schemaInput.value = '';
-    setStatus('Experiment created!', 'success');
+    setStatus('Experiment created successfully.', 'success');
     await fetchExperiments();
   } catch (error) {
     console.error(error);
-    setStatus(error.message || 'Failed to create experiment', 'error');
+    setStatus(error.message || 'Failed to create experiment.', 'error');
   }
 };
 
@@ -284,16 +293,16 @@ const importExperimentFromSql = async (event) => {
   event.preventDefault();
   const name = sqlNameInput.value.trim();
   if (!name) {
-    setStatus('Experiment name is required.', 'error');
+    setStatus('Provide an experiment name before importing.', 'error');
     return;
   }
   if (!sqlInput.value.trim()) {
-    setStatus('SQL input is required.', 'error');
+    setStatus('Paste SQL DDL before importing.', 'error');
     return;
   }
 
   clearWarningBanner();
-  setStatus('Importing SQL experiment...');
+  setStatus('Importing SQL experiment…');
   try {
     const payload = {
       name,
@@ -315,11 +324,11 @@ const importExperimentFromSql = async (event) => {
     }
     sqlInput.value = '';
     renderWarningBanner(body.warnings ?? [], createWarningBanner);
-    setStatus('Experiment imported!', 'success');
+    setStatus('Experiment imported successfully.', 'success');
     await fetchExperiments();
   } catch (error) {
     console.error(error);
-    setStatus(error.message || 'Failed to import SQL experiment', 'error');
+    setStatus(error.message || 'Failed to import SQL experiment.', 'error');
   }
 };
 
@@ -327,7 +336,7 @@ const deleteExperiment = async (name) => {
   if (!confirm(`Delete experiment "${name}"? This removes all data.`)) {
     return;
   }
-  setStatus(`Deleting ${name}...`);
+  setStatus(`Deleting "${name}"…`);
   try {
     const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(name)}`, {
       method: 'DELETE',
@@ -336,11 +345,11 @@ const deleteExperiment = async (name) => {
       const errorBody = await response.json();
       throw new Error((errorBody.detail || []).join(' '));
     }
-    setStatus(`Experiment ${name} deleted.`, 'success');
+    setStatus(`Deleted "${name}".`, 'success');
     await fetchExperiments();
   } catch (error) {
     console.error(error);
-    setStatus(error.message || 'Failed to delete experiment', 'error');
+    setStatus(error.message || 'Failed to delete experiment.', 'error');
   }
 };
 
@@ -348,7 +357,7 @@ const resetExperiment = async (name) => {
   if (!confirm(`Reset experiment "${name}"? This will truncate all tables but keep the schema.`)) {
     return;
   }
-  setStatus(`Resetting ${name}...`);
+  setStatus(`Resetting "${name}"…`);
   try {
     const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(name)}/reset`, {
       method: 'POST',
@@ -358,11 +367,12 @@ const resetExperiment = async (name) => {
       throw new Error((errorBody.detail || []).join(' '));
     }
     const result = await response.json();
-    setStatus(`Experiment ${name} reset (${result.reset_tables} table(s) truncated).`, 'success');
+    const tablesLabel = result.reset_tables === 1 ? 'table' : 'tables';
+    setStatus(`Reset complete (${result.reset_tables} ${tablesLabel} truncated).`, 'success');
     await fetchExperiments();
   } catch (error) {
     console.error(error);
-    setStatus(error.message || 'Failed to reset experiment', 'error');
+    setStatus(error.message || 'Failed to reset experiment.', 'error');
   }
 };
 
@@ -386,7 +396,7 @@ const openGenerateModal = async (name) => {
   experimentNameEl.textContent = name;
 
   // Fetch experiment details to get table information
-  setStatus('Loading experiment details...');
+  setStatus('Loading experiment details…');
   try {
     const response = await fetch(`${API_BASE}/experiments`);
     if (!response.ok) throw new Error('Failed to load experiment details');
@@ -440,7 +450,7 @@ const openGenerateModal = async (name) => {
     setStatus('');
   } catch (error) {
     console.error(error);
-    setStatus(error.message || 'Failed to open generate modal', 'error');
+    setStatus(error.message || 'Failed to open generate modal.', 'error');
   }
 };
 
@@ -453,7 +463,7 @@ const generateData = async (event) => {
   event.preventDefault();
 
   if (!currentExperiment) {
-    setStatus('No experiment selected', 'error');
+    setStatus('Select an experiment before generating data.', 'error');
     return;
   }
 
@@ -477,7 +487,7 @@ const generateData = async (event) => {
   }
 
   closeGenerateModal();
-  setStatus(`Generating data for ${experimentName}...`);
+  setStatus(`Generating data for "${experimentName}"…`);
 
   try {
     const response = await fetch(`${API_BASE}/experiments/${encodeURIComponent(experimentName)}/generate`, {
@@ -493,10 +503,11 @@ const generateData = async (event) => {
 
     const result = await response.json();
     const totalRows = result.tables.reduce((sum, t) => sum + t.row_count, 0);
-    setStatus(`Generated ${totalRows} rows across ${result.tables.length} table(s)!`, 'success');
+    const tableLabel = result.tables.length === 1 ? 'table' : 'tables';
+    setStatus(`Generated ${totalRows.toLocaleString()} rows across ${result.tables.length} ${tableLabel}.`, 'success');
   } catch (error) {
     console.error(error);
-    setStatus(error.message || 'Failed to generate data', 'error');
+    setStatus(error.message || 'Failed to generate data.', 'error');
   }
 };
 
