@@ -80,12 +80,15 @@ def test_generator_optional_column_can_be_null() -> None:
     rng = random.Random(0)
     rng.random = lambda: 0.0  # force null path
     faker = Faker()
+    table_schema = TableSchema(name="test_table", target_rows=10, columns=[column])
     value = generator._generate_value(
         column_schema=column,
+        table_schema=table_schema,
         rng=rng,
         faker=faker,
         unique_values=defaultdict(set),
         next_unique_int=defaultdict(int),
+        generated_values={},
     )
     assert value is None
 
@@ -112,14 +115,17 @@ def test_generator_normal_distribution_for_int_column() -> None:
     )
     rng = random.Random(1234)
     faker = Faker()
+    table_schema = TableSchema(name="test_table", target_rows=10, columns=[column])
 
     values = [
         generator._generate_value(
             column_schema=column,
+            table_schema=table_schema,
             rng=rng,
             faker=faker,
             unique_values=defaultdict(set),
             next_unique_int=defaultdict(int),
+            generated_values={},
         )
         for _ in range(5)
     ]
@@ -149,14 +155,17 @@ def test_generator_exponential_distribution_for_float_column() -> None:
     )
     rng = random.Random(321)
     faker = Faker()
+    table_schema = TableSchema(name="test_table", target_rows=10, columns=[column])
 
     values = [
         generator._generate_value(
             column_schema=column,
+            table_schema=table_schema,
             rng=rng,
             faker=faker,
             unique_values=defaultdict(set),
             next_unique_int=defaultdict(int),
+            generated_values={},
         )
         for _ in range(3)
     ]
@@ -185,15 +194,18 @@ def test_generator_beta_distribution_scales_to_range() -> None:
         },
     )
     faker = Faker()
+    table_schema = TableSchema(name="test_table", target_rows=10, columns=[column])
 
     rng = random.Random(999)
     values = [
         generator._generate_value(
             column_schema=column,
+            table_schema=table_schema,
             rng=rng,
             faker=faker,
             unique_values=defaultdict(set),
             next_unique_int=defaultdict(int),
+            generated_values={},
         )
         for _ in range(5)
     ]
@@ -563,3 +575,422 @@ def test_us41_combined_faker_and_ranges(tmp_path: Path) -> None:
 
     stocks = table.column("stock").to_pylist()
     assert all(0 <= stock <= 100 for stock in stocks)
+
+
+# US 6.2 Foreign Key Generation Tests
+
+
+def test_generator_foreign_key_basic_relationship(tmp_path: Path) -> None:
+    """Test that FK values are sampled from parent table's referenced column."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_basic_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="customers",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="customer_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", faker_rule="name", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=20,
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="customer_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="customers",
+                            references_column="customer_id",
+                        ),
+                    ),
+                    ColumnSchema(name="amount", data_type="FLOAT", min_value=1.0, max_value=1000.0),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=50)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=42),
+    )
+
+    # Read generated data
+    customers_table = pq.read_table(result.tables[0].files[0])
+    orders_table = pq.read_table(result.tables[1].files[0])
+
+    # Get customer IDs from parent table
+    customer_ids = set(customers_table.column("customer_id").to_pylist())
+    assert len(customer_ids) == 10
+
+    # Get FK values from child table
+    order_customer_ids = orders_table.column("customer_id").to_pylist()
+    assert len(order_customer_ids) == 20
+
+    # Verify all FK values reference valid parent table values
+    for fk_value in order_customer_ids:
+        assert fk_value in customer_ids, f"FK value {fk_value} not found in parent table"
+
+
+def test_generator_foreign_key_nullable(tmp_path: Path) -> None:
+    """Test that nullable FKs can generate NULL values."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_nullable_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="departments",
+                target_rows=5,
+                columns=[
+                    ColumnSchema(name="dept_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="dept_name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="employees",
+                target_rows=100,
+                columns=[
+                    ColumnSchema(name="emp_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", faker_rule="name", varchar_length=50),
+                    ColumnSchema(
+                        name="dept_id",
+                        data_type="INT",
+                        required=False,  # Nullable FK
+                        foreign_key=ForeignKeyConfig(
+                            references_table="departments",
+                            references_column="dept_id",
+                            nullable=True,
+                        ),
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=123),
+    )
+
+    # Read generated data
+    departments_table = pq.read_table(result.tables[0].files[0])
+    employees_table = pq.read_table(result.tables[1].files[0])
+
+    # Get department IDs from parent table
+    dept_ids = set(departments_table.column("dept_id").to_pylist())
+    assert len(dept_ids) == 5
+
+    # Get FK values from child table
+    emp_dept_ids = employees_table.column("dept_id").to_pylist()
+    assert len(emp_dept_ids) == 100
+
+    # Verify some NULL values exist (nullable FK should have ~10% NULL rate)
+    null_count = sum(1 for val in emp_dept_ids if val is None)
+    assert null_count > 0, "Nullable FK should produce some NULL values"
+
+    # Verify non-NULL FK values reference valid parent table values
+    non_null_fks = [val for val in emp_dept_ids if val is not None]
+    for fk_value in non_null_fks:
+        assert fk_value in dept_ids, f"FK value {fk_value} not found in parent table"
+
+
+def test_generator_foreign_key_multi_level_chain(tmp_path: Path) -> None:
+    """Test FK generation with multi-level dependency chain (A -> B -> C)."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_chain_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="regions",
+                target_rows=3,
+                columns=[
+                    ColumnSchema(name="region_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="region_name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="stores",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="store_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="store_name", data_type="VARCHAR", varchar_length=50),
+                    ColumnSchema(
+                        name="region_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="regions",
+                            references_column="region_id",
+                        ),
+                    ),
+                ],
+            ),
+            TableSchema(
+                name="sales",
+                target_rows=50,
+                columns=[
+                    ColumnSchema(name="sale_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="store_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="stores",
+                            references_column="store_id",
+                        ),
+                    ),
+                    ColumnSchema(name="amount", data_type="FLOAT", min_value=1.0, max_value=1000.0),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=999),
+    )
+
+    # Read generated data
+    regions_table = pq.read_table(result.tables[0].files[0])
+    stores_table = pq.read_table(result.tables[1].files[0])
+    sales_table = pq.read_table(result.tables[2].files[0])
+
+    # Verify FK relationships
+    region_ids = set(regions_table.column("region_id").to_pylist())
+    store_ids = set(stores_table.column("store_id").to_pylist())
+    store_region_ids = stores_table.column("region_id").to_pylist()
+    sale_store_ids = sales_table.column("store_id").to_pylist()
+
+    # Verify stores reference valid regions
+    for fk_value in store_region_ids:
+        assert fk_value in region_ids
+
+    # Verify sales reference valid stores
+    for fk_value in sale_store_ids:
+        assert fk_value in store_ids
+
+
+def test_generator_foreign_key_multiple_fks_in_one_table(tmp_path: Path) -> None:
+    """Test table with multiple FK columns referencing different parent tables."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_multiple_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="customers",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="customer_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="products",
+                target_rows=5,
+                columns=[
+                    ColumnSchema(name="product_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=30,
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="customer_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="customers",
+                            references_column="customer_id",
+                        ),
+                    ),
+                    ColumnSchema(
+                        name="product_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="products",
+                            references_column="product_id",
+                        ),
+                    ),
+                    ColumnSchema(name="quantity", data_type="INT", min_value=1, max_value=10),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=555),
+    )
+
+    # Read generated data
+    customers_table = pq.read_table(result.tables[0].files[0])
+    products_table = pq.read_table(result.tables[1].files[0])
+    orders_table = pq.read_table(result.tables[2].files[0])
+
+    # Get parent table values
+    customer_ids = set(customers_table.column("customer_id").to_pylist())
+    product_ids = set(products_table.column("product_id").to_pylist())
+
+    # Get FK values from orders
+    order_customer_ids = orders_table.column("customer_id").to_pylist()
+    order_product_ids = orders_table.column("product_id").to_pylist()
+
+    # Verify both FKs reference valid parent values
+    for fk_value in order_customer_ids:
+        assert fk_value in customer_ids
+
+    for fk_value in order_product_ids:
+        assert fk_value in product_ids
+
+
+def test_generator_topological_sort_respects_dependencies(tmp_path: Path) -> None:
+    """Test that topological sort generates parent tables before child tables."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_order_test",
+        description=None,
+        tables=[
+            # Define tables in reverse dependency order to test sorting
+            TableSchema(
+                name="line_items",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="line_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="order_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="orders",
+                            references_column="order_id",
+                        ),
+                    ),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=5,
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="customer_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="customers",
+                            references_column="customer_id",
+                        ),
+                    ),
+                ],
+            ),
+            TableSchema(
+                name="customers",
+                target_rows=3,
+                columns=[
+                    ColumnSchema(name="customer_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=777),
+    )
+
+    # Verify generation order in result (should be customers, orders, line_items)
+    assert result.tables[0].table_name == "customers"
+    assert result.tables[1].table_name == "orders"
+    assert result.tables[2].table_name == "line_items"
+
+    # Verify FK relationships are valid
+    customers_table = pq.read_table(result.tables[0].files[0])
+    orders_table = pq.read_table(result.tables[1].files[0])
+    line_items_table = pq.read_table(result.tables[2].files[0])
+
+    customer_ids = set(customers_table.column("customer_id").to_pylist())
+    order_ids = set(orders_table.column("order_id").to_pylist())
+
+    order_customer_ids = orders_table.column("customer_id").to_pylist()
+    line_order_ids = line_items_table.column("order_id").to_pylist()
+
+    for fk_value in order_customer_ids:
+        assert fk_value in customer_ids
+
+    for fk_value in line_order_ids:
+        assert fk_value in order_ids
+
+
+def test_generator_foreign_key_deterministic_seeding(tmp_path: Path) -> None:
+    """Test that FK generation is deterministic with same seed."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_deterministic_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="users",
+                target_rows=5,
+                columns=[
+                    ColumnSchema(name="user_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="posts",
+                target_rows=20,
+                columns=[
+                    ColumnSchema(name="post_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="user_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="users",
+                            references_column="user_id",
+                        ),
+                    ),
+                    ColumnSchema(name="content", data_type="VARCHAR", varchar_length=100),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+
+    # Generate twice with same seed
+    result1 = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "run1", seed=12345),
+    )
+    result2 = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "run2", seed=12345),
+    )
+
+    # Read generated data
+    posts1 = pq.read_table(result1.tables[1].files[0])
+    posts2 = pq.read_table(result2.tables[1].files[0])
+
+    # FK values should be identical across runs with same seed
+    fk_values1 = posts1.column("user_id").to_pylist()
+    fk_values2 = posts2.column("user_id").to_pylist()
+
+    assert fk_values1 == fk_values2, "FK generation should be deterministic with same seed"

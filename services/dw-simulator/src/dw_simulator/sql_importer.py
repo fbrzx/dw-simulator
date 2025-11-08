@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import sqlglot
 from sqlglot import exp
 
-from .schema import ColumnSchema, DataType, ExperimentSchema, TableSchema
+from .schema import ColumnSchema, DataType, ExperimentSchema, ForeignKeyConfig, TableSchema
 
 SUPPORTED_DIALECTS = {"redshift", "snowflake"}
 DEFAULT_TARGET_ROWS = 1000
@@ -49,7 +49,7 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
         if not isinstance(table_expr, exp.Table):
             continue
         table_name = _normalize_identifier(table_expr)
-        cols, constraints = _extract_columns_and_constraints(schema_node)
+        cols, constraints, foreign_keys = _extract_columns_and_constraints(schema_node)
         primary_key_columns = _dedupe_preserve_order(constraints.get("primary_key", []))
         is_composite_pk = len(primary_key_columns) > 1
 
@@ -63,12 +63,21 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
         pk_lookup = {col.lower() for col in primary_key_columns}
         for column in cols:
             col_name = column["name"]
+            fk_config = None
+            if col_name in foreign_keys:
+                fk_info = foreign_keys[col_name]
+                fk_config = ForeignKeyConfig(
+                    references_table=fk_info["references_table"],
+                    references_column=fk_info["references_column"],
+                )
+
             column_schemas.append(
                 ColumnSchema(
                     name=col_name,
                     data_type=column["type"],
                     varchar_length=column.get("varchar_length"),
                     is_unique=(not is_composite_pk and col_name.lower() in pk_lookup),
+                    foreign_key=fk_config,
                 )
             )
 
@@ -95,33 +104,105 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
     if not tables:
         raise SqlImportError("No CREATE TABLE statements were found in the supplied SQL.")
 
-    return ExperimentSchema(
+    schema = ExperimentSchema(
         name=options.experiment_name,
         tables=tables,
         target_warehouse=options.target_warehouse,
     )
 
+    # Validate generation constraints and auto-adjust target_rows if needed
+    constraint_warnings = schema.validate_generation_constraints()
+    for warning in constraint_warnings:
+        # Extract table name and recommended limit from warning
+        if "Table '" in warning and "reduce target_rows to ≤" in warning:
+            table_name = warning.split("Table '")[1].split("'")[0]
+            # Extract recommended limit (format: "reduce target_rows to ≤100")
+            recommended_str = warning.split("reduce target_rows to ≤")[1].split(" ")[0]
+            try:
+                recommended_limit = int(recommended_str)
+                # Find the table and auto-adjust if target_rows exceeds recommendation
+                for table in schema.tables:
+                    if table.name == table_name and table.target_rows > recommended_limit:
+                        old_rows = table.target_rows
+                        table.target_rows = recommended_limit
+                        # Update warning to reflect auto-adjustment
+                        adjusted_warning = (
+                            f"Table '{table_name}': Automatically reduced target_rows from {old_rows} to {recommended_limit} "
+                            f"to ensure unique value generation succeeds."
+                        )
+                        table.warnings.append(adjusted_warning)
+                        break
+            except (ValueError, IndexError):
+                # If we can't parse the limit, just add the warning as-is
+                for table in schema.tables:
+                    if table.name == table_name:
+                        table.warnings.append(warning)
+                        break
 
-def _extract_columns_and_constraints(schema_node: exp.Schema) -> tuple[list[dict], dict[str, list[str]]]:
+    return schema
+
+
+def _extract_columns_and_constraints(schema_node: exp.Schema) -> tuple[list[dict], dict[str, list[str]], dict[str, dict]]:
+    """
+    Extract columns and constraints from schema node.
+
+    Returns:
+        tuple: (columns, constraints, foreign_keys)
+            - columns: list of column dicts with name, type, etc.
+            - constraints: dict with 'primary_key' list
+            - foreign_keys: dict mapping column_name -> {references_table, references_column}
+    """
     columns: list[dict] = []
     constraints: dict[str, list[str]] = {"primary_key": []}
+    foreign_keys: dict[str, dict] = {}  # column_name -> {references_table, references_column}
 
     for expression in schema_node.expressions or []:
         if isinstance(expression, exp.ColumnDef):
-            columns.append(_parse_column_definition(expression))
+            col_def = _parse_column_definition(expression)
+            columns.append(col_def)
+            col_name = col_def["name"]
+
+            # Check for inline PRIMARY KEY and REFERENCES (FK)
             inline_pk = False
             for constraint in expression.args.get("constraints", []):
                 if isinstance(constraint, exp.ColumnConstraint):
                     kind = constraint.this or constraint.args.get("kind")
                     if isinstance(kind, (exp.PrimaryKey, exp.PrimaryKeyColumnConstraint)):
                         inline_pk = True
-                        break
+                    # Check for inline REFERENCES (FK) - parsed as Reference, not ForeignKey
+                    elif isinstance(kind, exp.Reference):
+                        fk_info = _parse_reference_constraint(kind)
+                        if fk_info:
+                            foreign_keys[col_name] = fk_info
+                    elif isinstance(kind, exp.ForeignKey):
+                        fk_info = _parse_foreign_key_constraint(kind, col_name)
+                        if fk_info:
+                            foreign_keys[col_name] = fk_info
+
             if inline_pk:
-                constraints["primary_key"].append(columns[-1]["name"])
+                constraints["primary_key"].append(col_name)
+
         elif isinstance(expression, exp.Constraint):
             if isinstance(expression.this, exp.PrimaryKey):
                 pk_columns = [_normalize_identifier(col) for col in expression.expressions or []]
                 constraints["primary_key"].extend(pk_columns)
+            # Check for table-level FOREIGN KEY constraints
+            elif isinstance(expression.this, exp.ForeignKey):
+                fk_columns = [_normalize_identifier(col) for col in expression.expressions or []]
+                if len(fk_columns) == 1:
+                    fk_info = _parse_foreign_key_constraint(expression.this, fk_columns[0])
+                    if fk_info:
+                        foreign_keys[fk_columns[0]] = fk_info
+                # Note: Multi-column FKs not yet supported, silently skip
+
+        elif isinstance(expression, exp.ForeignKey):
+            # Table-level FOREIGN KEY parsed directly (not wrapped in Constraint)
+            fk_columns = [_normalize_identifier(col) for col in expression.expressions or []]
+            if len(fk_columns) == 1:
+                fk_info = _parse_foreign_key_constraint(expression, fk_columns[0])
+                if fk_info:
+                    foreign_keys[fk_columns[0]] = fk_info
+
         elif isinstance(expression, exp.PrimaryKey):
             pk_columns = [
                 _normalize_identifier(expr.this if hasattr(expr, "this") else expr)
@@ -129,7 +210,99 @@ def _extract_columns_and_constraints(schema_node: exp.Schema) -> tuple[list[dict
             ]
             constraints["primary_key"].extend(pk_columns)
 
-    return columns, constraints
+    return columns, constraints, foreign_keys
+
+
+def _parse_reference_constraint(ref_node: exp.Reference) -> dict | None:
+    """
+    Parse an inline REFERENCES expression and return FK configuration.
+
+    Args:
+        ref_node: sqlglot Reference expression (inline FK syntax)
+
+    Returns:
+        dict with 'references_table' and 'references_column', or None if parsing fails
+    """
+    # Reference structure: Reference(this=Schema(this=Table(...), expressions=[Column(...)]))
+    schema_node = ref_node.this
+    if not schema_node or not isinstance(schema_node, exp.Schema):
+        return None
+
+    # Get table name from Schema.this
+    table_node = schema_node.this
+    if isinstance(table_node, exp.Table):
+        ref_table = _normalize_identifier(table_node)
+    elif isinstance(table_node, exp.Identifier):
+        ref_table = table_node.name
+    else:
+        return None
+
+    # Get column name from Schema.expressions
+    if not schema_node.expressions or len(schema_node.expressions) != 1:
+        return None
+
+    col_expr = schema_node.expressions[0]
+    if isinstance(col_expr, exp.Identifier):
+        ref_column = col_expr.name
+    elif isinstance(col_expr, exp.Column):
+        ref_column = _normalize_identifier(col_expr)
+    else:
+        ref_column = str(col_expr)
+
+    return {
+        "references_table": ref_table,
+        "references_column": ref_column,
+    }
+
+
+def _parse_foreign_key_constraint(fk_node: exp.ForeignKey, column_name: str) -> dict | None:
+    """
+    Parse a ForeignKey expression node (table-level constraint) and return FK configuration.
+
+    Args:
+        fk_node: sqlglot ForeignKey expression
+        column_name: Name of the column with the FK constraint
+
+    Returns:
+        dict with 'references_table' and 'references_column', or None if parsing fails
+    """
+    # Get the referenced table and column
+    reference = fk_node.args.get("reference")
+    if not reference or not isinstance(reference, exp.Reference):
+        return None
+
+    # Reference.this is a Schema node containing Table and column list
+    schema_node = reference.this
+    if not schema_node or not isinstance(schema_node, exp.Schema):
+        return None
+
+    # Extract table name from Schema.this
+    table_node = schema_node.this
+    if isinstance(table_node, exp.Table):
+        ref_table = _normalize_identifier(table_node)
+    elif isinstance(table_node, exp.Identifier):
+        ref_table = table_node.name
+    else:
+        ref_table = str(table_node)
+
+    # Extract column name(s) from Schema.expressions
+    ref_columns = schema_node.expressions
+    if not ref_columns or len(ref_columns) != 1:
+        # Multi-column FKs not supported yet
+        return None
+
+    ref_col_expr = ref_columns[0]
+    if isinstance(ref_col_expr, exp.Identifier):
+        ref_column = ref_col_expr.name
+    elif isinstance(ref_col_expr, exp.Column):
+        ref_column = _normalize_identifier(ref_col_expr)
+    else:
+        ref_column = str(ref_col_expr)
+
+    return {
+        "references_table": ref_table,
+        "references_column": ref_column,
+    }
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
@@ -194,13 +367,26 @@ def _map_data_type(data_type: exp.DataType) -> tuple[str, dict]:
 
 
 def _normalize_identifier(identifier: exp.Expression) -> str:
+    """
+    Normalize an identifier, stripping schema prefixes and quotes.
+
+    For schema-qualified names like "public.table_name", returns just "table_name".
+    """
     if isinstance(identifier, exp.Identifier):
-        return identifier.name
-    if isinstance(identifier, exp.Table):
-        return identifier.name
-    if isinstance(identifier, exp.Column):
-        return identifier.this.name
-    return identifier.sql().strip('"')
+        name = identifier.name
+    elif isinstance(identifier, exp.Table):
+        name = identifier.name
+    elif isinstance(identifier, exp.Column):
+        name = identifier.this.name
+    else:
+        name = identifier.sql().strip('"')
+
+    # Strip schema prefix if present (e.g., "public.table_name" -> "table_name")
+    if '.' in name:
+        parts = name.split('.', 1)
+        return parts[1] if len(parts) > 1 else parts[0]
+
+    return name
 
 
 __all__ = ["import_sql", "SqlImportOptions", "SqlImportError", "SUPPORTED_DIALECTS", "DEFAULT_TARGET_ROWS"]

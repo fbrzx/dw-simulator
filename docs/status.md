@@ -93,6 +93,18 @@ Enable users to define data generation rules for columns to produce realistic, c
 
 ## Completed User Stories (Continued)
 
+### US 6.1 – Advanced data generation with statistical distributions (✅ COMPLETE)
+Enable users to define statistical distributions for numeric columns to produce realistic, non-uniform synthetic data.
+
+**All steps completed:**
+1. **Schema model extensions (✅ complete):** Extended `ColumnSchema` with `DistributionConfig` supporting normal, exponential, and beta distributions. Added Pydantic validation for numeric columns and required parameters. Updated `docs/tech-spec.md` with distribution documentation. Added comprehensive schema unit tests.
+2. **Generator implementation (✅ complete):** Implemented distribution support with deterministic seeding, clamped range handling for all numeric columns, beta scaling into configured min/max windows, and integer rounding consistent with schema constraints. Added focused unit tests covering each distribution type.
+3. **CLI/API/UI integration (✅ complete):** Surfaced distribution metadata across all interfaces. CLI prints distribution summary after experiment creation, `GET /api/experiments` returns distributions array per experiment, Web UI renders distribution badges and per-table details in generate modal. Documentation updated with JSON examples.
+4. **Comprehensive testing (✅ complete):** Expanded generator and service distribution coverage with unit and integration tests verifying seeded runs respect numeric bounds, CLI helper formatting, and API summaries for multi-column configurations.
+
+**Test coverage:** All 185 tests passing
+**Acceptance criteria:** Distribution-based generation works across normal, exponential, and beta distributions with proper boundary enforcement and deterministic seeding.
+
 ### US 5.2 – Implement data-loader service for Redshift/Snowflake emulators (✅ COMPLETE)
 
 **Goal:** Enable SQL queries against local Redshift and Snowflake emulators instead of SQLite, allowing users to test warehouse-specific SQL features.
@@ -177,6 +189,7 @@ The dual-database architecture has been implemented and tested. The system now s
 **Risk:** LocalStack Snowflake emulator may have limited feature support
 
 ## Recent Work
+- **US 6.1 completion and test coverage improvements (✅ COMPLETE):** Marked US 6.1 (Advanced data generation with statistical distributions) as complete after verifying all 4 implementation steps. Added 14 comprehensive S3 client unit tests with mocking to achieve 100% coverage of s3_client.py module. Overall test suite now has 199 passing tests with 84% code coverage (up from 82%). Remaining coverage gaps are primarily in infrastructure code (S3/Redshift/Snowflake integration methods in persistence.py lines 831-992) that require Docker-based integration testing. Unit-testable code has >90% coverage.
 - **GitHub Actions CI Pipeline (✅ COMPLETE):** Implemented comprehensive CI/CD pipeline with 4 jobs: unit tests, end-to-end tests (all 3 warehouse dialects), build validation, and status aggregation. Created 3 new end-to-end tests (`test_e2e_warehouses.py`) covering complete workflows for SQLite (e-commerce: 100 customers, 250 orders), Redshift/PostgreSQL (analytics: 50 users, 200 events), and Snowflake (sales: 75 products, 150 sales). Each E2E test validates full stack from experiment creation through data generation, loading, and querying with warehouse-specific SQL features (window functions, CTEs, aggregations). Pipeline uses Docker Compose to orchestrate PostgreSQL (Redshift mock), LocalStack S3 (staging), and LocalStack Snowflake (emulator). Added pytest integration markers to separate unit tests (fast, no Docker) from integration tests (requires infrastructure). CI provides clear status checks for branch protection and runs on all `main` and `claude/**` branches plus pull requests. Total pipeline duration: ~15-20 minutes. Documentation includes local testing guide, debugging tips, and performance targets. All tests expected to pass.
 - **Multi-warehouse selection UI (US 5.2 Phase 3 Step 6 - ✅ COMPLETE):** Implemented complete user-facing warehouse selection system across CLI, API, and Web UI. Extended ExperimentSchema with optional `target_warehouse` field supporting sqlite/redshift/snowflake with case-insensitive validation. Updated SqlImportOptions to accept and pass through target_warehouse to generated schemas. Added `--target-warehouse` CLI flag to import-sql command with proper validation and informative output showing selected warehouse. Enhanced API with target_warehouse parameter in SqlImportPayload and included warehouse_type in all experiment metadata responses (GET /api/experiments, POST /api/experiments, POST /api/experiments/import-sql). Updated Web UI with warehouse selector dropdown in SQL import form (options: Default/SQLite/Redshift/Snowflake) and enhanced experiment cards to display warehouse type alongside table count and creation date. Added 12 comprehensive tests covering schema validation (8 tests), SQL importer pass-through (4 tests), and edge cases (case sensitivity, invalid values, null handling). System now provides complete per-experiment warehouse targeting with intelligent fallback to system defaults when not specified. All 172 tests expected to pass. Phase 3 complete - US 5.2 fully implemented with multi-warehouse support end-to-end.
 - **Snowpipe-style loading implementation (US 5.2 Phase 2 Step 5 - ✅ COMPLETE):** Implemented Snowflake COPY INTO loading workflow with S3 staging and intelligent fallback mechanisms. Updated ExperimentPersistence to detect and prioritize Snowflake warehouse URLs (priority: explicit > Redshift > Snowflake > SQLite). Added warehouse dialect detection to route loading operations to appropriate methods (_load_via_snowflake_copy for Snowflake, _load_via_s3_copy for PostgreSQL/Redshift, _load_via_direct_insert for SQLite). Implemented Snowflake COPY INTO command with Parquet format specification and pattern matching. Created _load_via_direct_insert_in_transaction() helper for fallback when COPY commands fail (handles LocalStack Snowflake emulator limitations). Documented supported data types (INT, FLOAT, VARCHAR, DATE, BOOLEAN) and future enhancement for Snowflake-specific types (VARIANT, ARRAY, OBJECT). Added 6 comprehensive tests covering warehouse URL priority, dialect detection, direct insert fallback, and docstring documentation verification. All 160 tests passing with full CI health verified. Phase 2 Snowflake integration complete - ready for Phase 3 (multi-warehouse selection UI).
@@ -194,12 +207,105 @@ The dual-database architecture has been implemented and tested. The system now s
 
 ## In Progress
 
-### US 6.1 – Advanced data generation with statistical distributions (IN PROGRESS)
-- **Step 1 (✅ COMPLETE):** Extended schema model with `DistributionConfig` support on `ColumnSchema`, added validation for numeric columns and required parameters, updated `docs/tech-spec.md`, and introduced new schema unit tests.
-- **Step 2 (✅ COMPLETE):** Implemented generator support for normal, exponential, and beta distributions with deterministic seeding driven by the existing RNG. Added clamped range handling for all numeric columns, beta scaling into configured min/max windows, and integer rounding consistent with schema constraints. Introduced focused unit tests covering each distribution to guarantee reproducible output sequences and boundary enforcement.
-- **Step 3 (✅ COMPLETE):** Surfaced distribution metadata across the CLI, API, and Web UI. The CLI now prints a distribution summary after successful experiment creation, `GET /api/experiments` returns a `distributions` array per experiment, and the Web UI renders distribution badges on experiment cards plus per-table details in the generate modal. Documentation updated with JSON examples and workflow guidance. New API/CLI tests verify the response payloads and console output.
-- **Step 4 (✅ COMPLETE):** Expanded generator + service distribution coverage with new unit and integration tests verifying
-  seeded runs respect numeric bounds, CLI helper formatting, and API summaries for multi-column configurations.
+### US 6.2 – Foreign key relationship enforcement during generation (IN PROGRESS)
+
+**Goal:** Enable users to define foreign key relationships between tables, ensuring generated data maintains referential integrity (child table foreign keys reference valid primary keys from parent tables).
+
+**Implementation Plan:**
+
+**Step 1: Schema Model Extensions (✅ COMPLETE)**
+- ✅ Extended `ColumnSchema` with optional `foreign_key: ForeignKeyConfig` field
+- ✅ Implemented `ForeignKeyConfig` Pydantic model with full validation:
+  - Validates referenced table/column names as SQL identifiers
+  - Supports optional `nullable` field for NULL FK values
+- ✅ Added `TableSchema.foreign_keys` list to collect FK metadata from columns
+- ✅ Implemented `ExperimentSchema.validate_foreign_keys()` validator:
+  - Verifies referenced tables and columns exist
+  - Enforces that referenced columns are unique (primary keys)
+  - Detects circular FK dependencies via topological sort
+  - Allows nullable FKs to break cycles
+- ✅ Added 10 comprehensive unit tests covering:
+  - Valid FK relationships and multi-table chains
+  - Invalid references (non-existent table/column, non-unique column)
+  - Circular dependency detection and nullable FK cycle breaking
+  - Multiple FKs per table
+- ✅ Updated `docs/tech-spec.md` with comprehensive FK documentation:
+  - JSON schema examples with FK definitions
+  - Validation rules and generation behavior
+  - SQL import FK detection roadmap
+  - Multi-level FK chain example (customers → orders → order_items)
+- **Test Results:** All 209 tests passing, schema.py coverage at 95%
+
+**Step 2: SQL Import FK Detection (✅ COMPLETE)**
+- ✅ Extended SQL parser to detect both inline and table-level FK constraints:
+  - Inline REFERENCES: `customer_id INT REFERENCES customers(id)` (parsed as `exp.Reference`)
+  - Table-level: `FOREIGN KEY (customer_id) REFERENCES customers(id)` (parsed as `exp.ForeignKey`)
+- ✅ Implemented two parser functions:
+  - `_parse_reference_constraint()` for inline REFERENCES syntax
+  - `_parse_foreign_key_constraint()` for table-level FOREIGN KEY syntax
+- ✅ Both parsers extract `references_table` and `references_column` from sqlglot AST
+- ✅ FK information automatically mapped to `ColumnSchema.foreign_key` during SQL import
+- ✅ Multi-column FKs silently skipped (not yet supported)
+- ✅ Added 6 comprehensive unit tests covering:
+  - Inline FK detection (Redshift & Snowflake dialects)
+  - Table-level FK detection
+  - Multiple FKs in single table
+  - Multi-level FK chains (customers → orders → order_items)
+  - Tables without FKs
+- **Test Results:** All 215 tests passing, sql_importer.py coverage at 78%
+- **Note:** Warnings for unsupported FK features (ON DELETE/UPDATE) deferred to future enhancement
+
+**Step 3: Generator Referential Integrity (✅ COMPLETE)**
+- ✅ Implemented topological sort for FK dependency resolution:
+  - `_topological_sort_tables()` using Kahn's algorithm
+  - Generates parent tables before child tables
+  - Only enforces hard dependencies for required (non-nullable) FKs
+  - Nullable FKs don't create hard dependencies, allowing flexible ordering
+- ✅ Implemented FK value sampling from parent tables:
+  - `_generate_foreign_key_value()` samples from parent table's referenced column values
+  - Modified `_generate_table()` to track and return unique column values
+  - Modified `generate()` to maintain `generated_values` dict across tables
+  - Case-insensitive table name lookups for FK resolution
+- ✅ Implemented nullable FK handling:
+  - 10% NULL injection rate for nullable FKs (configurable via `rng.random() < 0.10`)
+  - Nullable detection checks both `column.required` and `fk_config.nullable` fields
+- ✅ Added deterministic seeding for FK relationships:
+  - FK value selection uses same `random.Random` instance as rest of generation
+  - Identical seeds produce identical FK relationships across runs
+- ✅ Added comprehensive error handling:
+  - Clear error messages when parent table not yet generated
+  - Validation that referenced columns have generated values
+  - Topological sort ensures generation order is always valid
+- ✅ Added 6 comprehensive unit tests:
+  - `test_generator_foreign_key_basic_relationship`: Basic FK sampling from parent table
+  - `test_generator_foreign_key_nullable`: NULL value injection for nullable FKs (~10% rate)
+  - `test_generator_foreign_key_multi_level_chain`: 3-level FK chain (regions → stores → sales)
+  - `test_generator_foreign_key_multiple_fks_in_one_table`: Table with multiple FK columns
+  - `test_generator_topological_sort_respects_dependencies`: Generation order verification
+  - `test_generator_foreign_key_deterministic_seeding`: Same seed produces identical relationships
+- **Test Results:** All 221 tests passing (2 skipped), generator.py coverage at 92% (up from 83%), overall coverage at 84%
+
+**Step 4: Integration Testing & Documentation (P1)**
+- Create end-to-end test with multi-table FK scenario (e.g., Customer → Order → OrderLine)
+- Verify generated data passes referential integrity checks via SQL JOINs
+- Add CLI example: `dw-sim experiment generate` with FK-enabled schema
+- Update README.md with FK usage examples:
+  - JSON schema with FK definitions
+  - SQL import with FK preservation
+  - Query examples demonstrating referential integrity
+- Document limitations (e.g., circular dependencies must be broken with nullable FKs)
+
+**Acceptance Criteria:**
+- AC 1: Users can define FK relationships in JSON schemas with full validation
+- AC 2: SQL import detects and preserves FK constraints from DDL
+- AC 3: Generator produces data where all FK values reference existing parent keys
+- AC 4: Nullable FKs correctly introduce NULL values
+- AC 5: Generation fails gracefully with clear errors for circular or impossible FK constraints
+- AC 6: Comprehensive test coverage (unit + integration) validates FK enforcement
+
+**Estimated Effort:** 3-4 days
+**Dependencies:** None (builds on existing schema/generator infrastructure)
+**Risk:** Complex FK graphs may require sophisticated dependency resolution
 
 ## Backlog
 

@@ -79,19 +79,80 @@ class ExperimentGenerator:
         tables: list[TableGenerationResult] = []
         overrides = {k.lower(): v for k, v in (request.row_overrides or {}).items()}
 
-        for table_schema in schema.tables:
+        # Sort tables by FK dependencies (parent tables first)
+        sorted_tables = self._topological_sort_tables(schema.tables)
+
+        # Track generated values for FK sampling
+        # Maps: table_name -> column_name -> list of generated unique values
+        generated_values: dict[str, dict[str, list[Any]]] = {}
+
+        for table_schema in sorted_tables:
             target_rows = overrides.get(table_schema.name.lower(), table_schema.target_rows)
             if target_rows <= 0:
                 raise GenerationError(f"Target rows for table '{table_schema.name}' must be > 0.")
 
             table_dir = output_dir / table_schema.name
             table_dir.mkdir(parents=True, exist_ok=True)
-            files = self._generate_table(table_schema, target_rows, table_dir, rng, faker)
+            files, unique_column_values = self._generate_table(
+                table_schema, target_rows, table_dir, rng, faker, generated_values
+            )
             tables.append(TableGenerationResult(table_name=table_schema.name, row_count=target_rows, files=files))
+
+            # Store generated unique values for FK referencing (use lowercase for case-insensitive lookups)
+            if unique_column_values:
+                generated_values[table_schema.name.lower()] = unique_column_values
 
         return GenerationResult(experiment_name=schema.name, output_dir=output_dir, tables=tables)
 
     # Internal helpers -----------------------------------------------------
+
+    def _topological_sort_tables(self, tables: list[TableSchema]) -> list[TableSchema]:
+        """
+        Sort tables by FK dependencies using topological sort.
+
+        Returns tables in generation order (parent tables before children).
+        Circular dependencies should have been detected during schema validation.
+        """
+        # Build dependency graph
+        table_map = {t.name.lower(): t for t in tables}
+        dependencies: dict[str, set[str]] = {t.name.lower(): set() for t in tables}
+
+        for table in tables:
+            table_name = table.name.lower()
+            for col_name, fk_config in table.foreign_keys:
+                # Find the column to check if FK is nullable
+                column = next((c for c in table.columns if c.name == col_name), None)
+                if column:
+                    # Only add hard dependency if FK is required (not nullable)
+                    is_nullable = (not column.required) or (fk_config.nullable is True)
+                    if not is_nullable:
+                        ref_table = fk_config.references_table.lower()
+                        if ref_table in table_map:
+                            dependencies[table_name].add(ref_table)
+
+        # Kahn's algorithm for topological sort
+        # in_degree[X] = number of dependencies X has (how many tables X depends on)
+        in_degree = {name: len(deps) for name, deps in dependencies.items()}
+
+        # Find all nodes with no dependencies (these are root tables)
+        queue = [name for name, degree in in_degree.items() if degree == 0]
+        sorted_names: list[str] = []
+
+        while queue:
+            # Sort queue for deterministic ordering
+            queue.sort()
+            current = queue.pop(0)
+            sorted_names.append(current)
+
+            # For each node that depends on current, decrement in-degree
+            for table_name, deps in dependencies.items():
+                if current in deps:
+                    in_degree[table_name] -= 1
+                    if in_degree[table_name] == 0:
+                        queue.append(table_name)
+
+        # Return tables in sorted order
+        return [table_map[name] for name in sorted_names]
 
     def _generate_table(
         self,
@@ -100,10 +161,23 @@ class ExperimentGenerator:
         output_dir: Path,
         rng: random.Random,
         faker: Faker,
-    ) -> list[Path]:
+        generated_values: dict[str, dict[str, list[Any]]],
+    ) -> tuple[list[Path], dict[str, list[Any]]]:
+        """
+        Generate synthetic data for a table.
+
+        Args:
+            generated_values: Previously generated unique values from parent tables for FK sampling
+
+        Returns:
+            Tuple of (parquet files, unique column values for this table)
+        """
         files: list[Path] = []
         unique_values: dict[str, set[Any]] = defaultdict(set)
         next_unique_int: dict[str, int] = defaultdict(int)
+
+        # Track unique column values for FK referencing by child tables
+        unique_column_values: dict[str, list[Any]] = {}
 
         # Initialize surrogate key columns (_row_id) to start at 1 instead of 0
         for column_schema in table_schema.columns:
@@ -121,12 +195,21 @@ class ExperimentGenerator:
                 for column_schema in table_schema.columns:
                     value = self._generate_value(
                         column_schema=column_schema,
+                        table_schema=table_schema,
                         rng=rng,
                         faker=faker,
                         unique_values=unique_values,
                         next_unique_int=next_unique_int,
+                        generated_values=generated_values,
                     )
                     row[column_schema.name] = value
+
+                    # Track unique column values for FK referencing
+                    if column_schema.is_unique and value is not None:
+                        if column_schema.name not in unique_column_values:
+                            unique_column_values[column_schema.name] = []
+                        unique_column_values[column_schema.name].append(value)
+
                 records.append(row)
 
             table = pa.Table.from_pylist(records)
@@ -134,16 +217,26 @@ class ExperimentGenerator:
             pq.write_table(table, file_path, compression="snappy")
             files.append(file_path)
             batch_index += 1
-        return files
+
+        return files, unique_column_values
 
     def _generate_value(
         self,
         column_schema: ColumnSchema,
+        table_schema: TableSchema,
         rng: random.Random,
         faker: Faker,
         unique_values: dict[str, set[Any]],
         next_unique_int: dict[str, int],
+        generated_values: dict[str, dict[str, list[Any]]],
     ) -> Any:
+        # Handle FK columns by sampling from parent table
+        if column_schema.foreign_key is not None:
+            return self._generate_foreign_key_value(
+                column_schema, table_schema, rng, generated_values
+            )
+
+        # Handle nullable columns
         if not column_schema.required and rng.random() < 0.05:
             return None
 
@@ -171,6 +264,49 @@ class ExperimentGenerator:
                     continue
                 bucket.add(value)
             return value
+
+    def _generate_foreign_key_value(
+        self,
+        column_schema: ColumnSchema,
+        table_schema: TableSchema,
+        rng: random.Random,
+        generated_values: dict[str, dict[str, list[Any]]],
+    ) -> Any:
+        """
+        Generate a value for a FK column by sampling from the parent table's referenced column.
+
+        Returns None if FK is nullable and random dice roll succeeds.
+        """
+        fk_config = column_schema.foreign_key
+        if fk_config is None:
+            raise GenerationError(f"Internal error: _generate_foreign_key_value called for non-FK column '{column_schema.name}'.")
+
+        # Determine if FK is nullable
+        is_nullable = (not column_schema.required) or (fk_config.nullable is True)
+
+        # Nullable FKs have 10% chance of being NULL
+        if is_nullable and rng.random() < 0.10:
+            return None
+
+        # Get parent table's generated values (use lowercase for case-insensitive lookups)
+        ref_table = fk_config.references_table.lower()
+        ref_column = fk_config.references_column
+
+        if ref_table not in generated_values:
+            raise GenerationError(
+                f"Table '{table_schema.name}' column '{column_schema.name}' references table '{fk_config.references_table}', "
+                f"but that table has not been generated yet. Check FK dependency order."
+            )
+
+        parent_values = generated_values[ref_table].get(ref_column)
+        if not parent_values:
+            raise GenerationError(
+                f"Table '{table_schema.name}' column '{column_schema.name}' references "
+                f"'{ref_table}.{ref_column}', but no values were generated for that column."
+            )
+
+        # Sample a random value from the parent table's column
+        return rng.choice(parent_values)
 
     def _generate_int(
         self,

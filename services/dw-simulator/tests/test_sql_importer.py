@@ -167,3 +167,194 @@ def test_import_sql_without_target_warehouse() -> None:
         dialect="redshift"
     ))
     assert schema.target_warehouse is None
+
+
+# ============================================================================
+# Foreign Key Tests
+# ============================================================================
+
+
+def test_import_sql_with_inline_foreign_key_redshift() -> None:
+    """Test that inline REFERENCES syntax is detected in Redshift."""
+    sql = """
+    CREATE TABLE customers (
+        customer_id INT PRIMARY KEY,
+        email VARCHAR(255)
+    );
+
+    CREATE TABLE orders (
+        order_id INT PRIMARY KEY,
+        customer_id INT REFERENCES customers(customer_id),
+        order_total FLOAT
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="ecommerce",
+        dialect="redshift"
+    ))
+
+    assert len(schema.tables) == 2
+    orders_table = schema.tables[1]
+    assert orders_table.name == "orders"
+
+    # Find customer_id column
+    customer_id_col = next((c for c in orders_table.columns if c.name == "customer_id"), None)
+    assert customer_id_col is not None
+    assert customer_id_col.foreign_key is not None
+    assert customer_id_col.foreign_key.references_table == "customers"
+    assert customer_id_col.foreign_key.references_column == "customer_id"
+
+
+def test_import_sql_with_inline_foreign_key_snowflake() -> None:
+    """Test that inline REFERENCES syntax is detected in Snowflake."""
+    sql = """
+    CREATE TABLE users (
+        user_id BIGINT PRIMARY KEY,
+        username VARCHAR(100)
+    );
+
+    CREATE TABLE posts (
+        post_id BIGINT PRIMARY KEY,
+        user_id BIGINT REFERENCES users(user_id),
+        content TEXT
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="social",
+        dialect="snowflake"
+    ))
+
+    assert len(schema.tables) == 2
+    posts_table = schema.tables[1]
+
+    user_id_col = next((c for c in posts_table.columns if c.name == "user_id"), None)
+    assert user_id_col is not None
+    assert user_id_col.foreign_key is not None
+    assert user_id_col.foreign_key.references_table == "users"
+    assert user_id_col.foreign_key.references_column == "user_id"
+
+
+def test_import_sql_with_table_level_foreign_key() -> None:
+    """Test that table-level FOREIGN KEY constraints are detected."""
+    sql = """
+    CREATE TABLE products (
+        product_id INT PRIMARY KEY,
+        name VARCHAR(200)
+    );
+
+    CREATE TABLE reviews (
+        review_id INT PRIMARY KEY,
+        product_id INT,
+        rating INT,
+        FOREIGN KEY (product_id) REFERENCES products(product_id)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="reviews_system",
+        dialect="redshift"
+    ))
+
+    assert len(schema.tables) == 2
+    reviews_table = schema.tables[1]
+
+    product_id_col = next((c for c in reviews_table.columns if c.name == "product_id"), None)
+    assert product_id_col is not None
+    assert product_id_col.foreign_key is not None
+    assert product_id_col.foreign_key.references_table == "products"
+    assert product_id_col.foreign_key.references_column == "product_id"
+
+
+def test_import_sql_with_multiple_foreign_keys() -> None:
+    """Test that multiple FKs in a single table are detected."""
+    sql = """
+    CREATE TABLE users (
+        user_id INT PRIMARY KEY
+    );
+
+    CREATE TABLE products (
+        product_id INT PRIMARY KEY
+    );
+
+    CREATE TABLE orders (
+        order_id INT PRIMARY KEY,
+        user_id INT REFERENCES users(user_id),
+        product_id INT REFERENCES products(product_id)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="marketplace",
+        dialect="redshift"
+    ))
+
+    assert len(schema.tables) == 3
+    orders_table = schema.tables[2]
+
+    user_id_col = next((c for c in orders_table.columns if c.name == "user_id"), None)
+    assert user_id_col is not None
+    assert user_id_col.foreign_key is not None
+    assert user_id_col.foreign_key.references_table == "users"
+
+    product_id_col = next((c for c in orders_table.columns if c.name == "product_id"), None)
+    assert product_id_col is not None
+    assert product_id_col.foreign_key is not None
+    assert product_id_col.foreign_key.references_table == "products"
+
+
+def test_import_sql_with_multi_level_foreign_keys() -> None:
+    """Test that FK chains (customers -> orders -> order_items) are detected."""
+    sql = """
+    CREATE TABLE customers (
+        customer_id INT PRIMARY KEY,
+        name VARCHAR(100)
+    );
+
+    CREATE TABLE orders (
+        order_id INT PRIMARY KEY,
+        customer_id INT REFERENCES customers(customer_id)
+    );
+
+    CREATE TABLE order_items (
+        item_id INT PRIMARY KEY,
+        order_id INT REFERENCES orders(order_id),
+        quantity INT
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="retail",
+        dialect="redshift"
+    ))
+
+    assert len(schema.tables) == 3
+
+    # Verify orders -> customers FK
+    orders_table = schema.tables[1]
+    orders_fk = next((c for c in orders_table.columns if c.name == "customer_id"), None)
+    assert orders_fk is not None
+    assert orders_fk.foreign_key.references_table == "customers"
+
+    # Verify order_items -> orders FK
+    items_table = schema.tables[2]
+    items_fk = next((c for c in items_table.columns if c.name == "order_id"), None)
+    assert items_fk is not None
+    assert items_fk.foreign_key.references_table == "orders"
+
+
+def test_import_sql_without_foreign_keys() -> None:
+    """Test that tables without FKs are handled correctly."""
+    sql = """
+    CREATE TABLE standalone (
+        id INT PRIMARY KEY,
+        data VARCHAR(100)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="simple",
+        dialect="redshift"
+    ))
+
+    assert len(schema.tables) == 1
+    table = schema.tables[0]
+
+    # Verify no columns have FK constraints
+    for col in table.columns:
+        assert col.foreign_key is None

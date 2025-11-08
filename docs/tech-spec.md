@@ -212,6 +212,131 @@ Real-world data warehouses frequently employ composite primary keys (e.g., `PRIM
 
 This approach balances practical synthetic data generation (which benefits from single-column unique identifiers) with fidelity to the original schema design, ensuring users understand the transformation and can adapt downstream workflows accordingly.
 
+#### Foreign Key Relationships & Referential Integrity
+
+The simulator supports foreign key (FK) relationships between tables, ensuring generated data maintains referential integrity. This enables realistic multi-table scenarios (e.g., customers → orders → order_items) and allows testing of JOIN queries.
+
+**1. Schema Definition**
+
+Users define FK relationships in the `ColumnSchema.foreign_key` field:
+
+```json
+{
+  "name": "ecommerce_experiment",
+  "tables": [
+    {
+      "name": "customers",
+      "target_rows": 100,
+      "columns": [
+        {"name": "customer_id", "data_type": "INT", "is_unique": true, "required": true},
+        {"name": "email", "data_type": "VARCHAR", "faker_rule": "internet.email"}
+      ]
+    },
+    {
+      "name": "orders",
+      "target_rows": 500,
+      "columns": [
+        {"name": "order_id", "data_type": "INT", "is_unique": true, "required": true},
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "customers",
+            "references_column": "customer_id"
+          }
+        },
+        {"name": "order_total", "data_type": "FLOAT"}
+      ]
+    }
+  ]
+}
+```
+
+**2. Validation Rules**
+
+The schema validation layer (`ExperimentSchema`) enforces:
+- **Referenced table exists:** FK must point to a valid table in the experiment
+- **Referenced column exists:** The column must exist in the target table
+- **Referenced column is unique:** FK must reference a unique column (typically a primary key)
+- **No circular dependencies:** Required (non-nullable) FKs cannot form cycles
+
+**3. Generation Behavior**
+
+During data generation:
+- **Topological ordering:** Tables are generated in dependency order (parent before child)
+- **Value sampling:** FK column values are sampled from the parent table's unique column value pool
+- **Nullable FKs:** When `nullable: true` or `required: false`, NULL values can be introduced
+- **Circular dependency handling:** Nullable FKs break cycles, allowing multi-pass generation
+
+**4. SQL Import FK Detection**
+
+The SQL parser (`sql_importer.py`) automatically detects FK constraints:
+```sql
+CREATE TABLE orders (
+  order_id INT PRIMARY KEY,
+  customer_id INT REFERENCES customers(customer_id),  -- Inline FK
+  order_date DATE
+);
+```
+
+Detected FKs are mapped to `ColumnSchema.foreign_key` configuration during import.
+
+**5. Limitations & Future Work**
+
+Current limitations:
+- No support for ON DELETE/ON UPDATE actions (CASCADE, SET NULL, etc.)
+- Self-referential FKs (table references itself) require nullable FKs to prevent cycles
+- FK generation uses simple random sampling; future enhancements may add cardinality controls (e.g., "each customer has 3-10 orders")
+
+**Example: Multi-Level FK Chain**
+
+```json
+{
+  "name": "retail_analytics",
+  "tables": [
+    {
+      "name": "customers",
+      "target_rows": 100,
+      "columns": [
+        {"name": "customer_id", "data_type": "INT", "is_unique": true}
+      ]
+    },
+    {
+      "name": "orders",
+      "target_rows": 500,
+      "columns": [
+        {"name": "order_id", "data_type": "INT", "is_unique": true},
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "foreign_key": {"references_table": "customers", "references_column": "customer_id"}
+        }
+      ]
+    },
+    {
+      "name": "order_items",
+      "target_rows": 2000,
+      "columns": [
+        {"name": "item_id", "data_type": "INT", "is_unique": true},
+        {
+          "name": "order_id",
+          "data_type": "INT",
+          "foreign_key": {"references_table": "orders", "references_column": "order_id"}
+        },
+        {"name": "product_name", "data_type": "VARCHAR"},
+        {"name": "quantity", "data_type": "INT"}
+      ]
+    }
+  ]
+}
+```
+
+This schema ensures:
+- Every `orders.customer_id` references a valid `customers.customer_id`
+- Every `order_items.order_id` references a valid `orders.order_id`
+- Generation order: customers → orders → order_items
+
 #### A. Component Breakdown (Microservices/Utilities)
 
 | Component | Type | Core Capability | Dependency (Base Image) | Status |

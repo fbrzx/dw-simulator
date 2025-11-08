@@ -10,6 +10,7 @@ const dialectSelect = document.getElementById('dialect-select');
 const warehouseSelect = document.getElementById('warehouse-select');
 const modeTabs = document.querySelectorAll('.mode-tab');
 const warningBanner = document.getElementById('warning-banner');
+const createWarningBanner = document.getElementById('create-warning-banner');
 
 // Main tab handling
 const mainTabs = document.querySelectorAll('.main-tab');
@@ -40,17 +41,17 @@ const setStatus = (message, type = 'info') => {
   statusEl.className = type;
 };
 
-const renderWarningBanner = (warnings) => {
-  if (!warningBanner) return;
+const renderWarningBanner = (warnings, banner = warningBanner) => {
+  if (!banner) return;
 
-  warningBanner.innerHTML = '';
+  banner.innerHTML = '';
 
   if (!warnings || warnings.length === 0) {
-    warningBanner.classList.add('hidden');
+    banner.classList.add('hidden');
     return;
   }
 
-  warningBanner.classList.remove('hidden');
+  banner.classList.remove('hidden');
 
   const icon = document.createElement('span');
   icon.className = 'warning-icon';
@@ -70,12 +71,13 @@ const renderWarningBanner = (warnings) => {
   });
   content.appendChild(list);
 
-  warningBanner.appendChild(icon);
-  warningBanner.appendChild(content);
+  banner.appendChild(icon);
+  banner.appendChild(content);
 };
 
 const clearWarningBanner = () => {
-  renderWarningBanner([]);
+  renderWarningBanner([], warningBanner);
+  renderWarningBanner([], createWarningBanner);
 };
 
 let activeMode = 'json';
@@ -121,6 +123,7 @@ const updateQueryTabState = (experiments) => {
 
 const fetchExperiments = async () => {
   setStatus('Loading experiments...');
+  clearWarningBanner();  // Clear warnings when refreshing
   try {
     const response = await fetch(`${API_BASE}/experiments`);
     if (!response.ok) throw new Error('Failed to load experiments');
@@ -311,7 +314,7 @@ const importExperimentFromSql = async (event) => {
       throw new Error((body.detail || []).join(' '));
     }
     sqlInput.value = '';
-    renderWarningBanner(body.warnings ?? []);
+    renderWarningBanner(body.warnings ?? [], createWarningBanner);
     setStatus('Experiment imported!', 'success');
     await fetchExperiments();
   } catch (error) {
