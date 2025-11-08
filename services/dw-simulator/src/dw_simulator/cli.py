@@ -18,6 +18,7 @@ import uvicorn
 
 from . import __version__
 from .config import get_stage_bucket, get_target_db_url
+from .schema import WarehouseType
 from .service import (
     ExperimentCreateResult,
     ExperimentDeleteResult,
@@ -103,8 +104,9 @@ def create_experiment(schema_file: Path = typer.Argument(..., help="Path to the 
         _print_errors_and_exit(result)
 
     assert result.metadata is not None  # For type checkers; success implies metadata
+    warehouse_info = f" targeting {result.metadata.warehouse_type}" if result.metadata.warehouse_type else ""
     typer.secho(
-        f"Experiment '{result.metadata.name}' created with {len(result.metadata.schema_json)} bytes of schema.",
+        f"Experiment '{result.metadata.name}' created{warehouse_info} with {len(result.metadata.schema_json)} bytes of schema.",
         fg=typer.colors.GREEN,
     )
 
@@ -194,12 +196,21 @@ def import_sql_command(
     name: str = typer.Option(..., "--name", "-n", help="Experiment name to store in the simulator."),
     dialect: str = typer.Option("redshift", "--dialect", "-d", help=f"Dialect ({', '.join(SUPPORTED_DIALECTS)})"),
     target_rows: int = typer.Option(1000, help="Default target row count per table."),
+    target_warehouse: str | None = typer.Option(None, "--target-warehouse", "-w", help=f"Target warehouse type (sqlite/redshift/snowflake). Defaults to system default."),
 ) -> None:
     """Create an experiment by importing warehouse DDL (Redshift/Snowflake)."""
 
     if dialect.lower() not in SUPPORTED_DIALECTS:
         typer.secho(f"Unsupported dialect '{dialect}'. Choose from {', '.join(SUPPORTED_DIALECTS)}.", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
+
+    if target_warehouse is not None:
+        warehouse_lower = target_warehouse.lower()
+        if warehouse_lower not in {WarehouseType.SQLITE, WarehouseType.REDSHIFT, WarehouseType.SNOWFLAKE}:
+            typer.secho(f"Unsupported warehouse type '{target_warehouse}'. Choose from: sqlite, redshift, snowflake.", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        target_warehouse = warehouse_lower
+
     try:
         sql_text = sql_file.read_text()
     except OSError as exc:
@@ -207,11 +218,18 @@ def import_sql_command(
         raise typer.Exit(code=1)
 
     service = ExperimentService()
-    result = service.create_experiment_from_sql(name=name, sql=sql_text, dialect=dialect, target_rows=target_rows)
+    result = service.create_experiment_from_sql(
+        name=name,
+        sql=sql_text,
+        dialect=dialect,
+        target_rows=target_rows,
+        target_warehouse=target_warehouse,
+    )
     if not result.success:
         _print_errors_and_exit(result)
     assert result.metadata
-    typer.secho(f"Experiment '{name}' created from SQL ({dialect})", fg=typer.colors.GREEN)
+    warehouse_info = f" targeting {result.metadata.warehouse_type}" if result.metadata.warehouse_type else ""
+    typer.secho(f"Experiment '{name}' created from SQL ({dialect}){warehouse_info}", fg=typer.colors.GREEN)
 
 
 @query_app.command("execute")

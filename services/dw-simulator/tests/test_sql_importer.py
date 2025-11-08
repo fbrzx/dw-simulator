@@ -101,3 +101,69 @@ def test_import_sql_rejects_unknown_dialect() -> None:
     sql = "CREATE TABLE demo (id BIGINT);"
     with pytest.raises(SqlImportError):
         import_sql(sql, SqlImportOptions(experiment_name="demo", dialect="oracle"))
+
+
+# US 5.2 Phase 3: Warehouse selection tests
+
+
+def test_import_sql_with_target_warehouse_sqlite() -> None:
+    """Test that SqlImportOptions accepts and passes through target_warehouse for SQLite."""
+    sql = """
+    CREATE TABLE products (
+        product_id BIGINT PRIMARY KEY,
+        name VARCHAR(200)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="products",
+        dialect="redshift",
+        target_warehouse="sqlite"
+    ))
+    assert schema.target_warehouse == "sqlite"
+
+
+def test_import_sql_with_target_warehouse_redshift() -> None:
+    """Test that SqlImportOptions accepts and passes through target_warehouse for Redshift."""
+    sql = """
+    CREATE TABLE products (
+        product_id BIGINT PRIMARY KEY,
+        name VARCHAR(200)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="products",
+        dialect="redshift",
+        target_warehouse="redshift"
+    ))
+    assert schema.target_warehouse == "redshift"
+
+
+def test_import_sql_with_target_warehouse_snowflake() -> None:
+    """Test that SqlImportOptions accepts and passes through target_warehouse for Snowflake."""
+    sql = """
+    CREATE TABLE products (
+        product_id BIGINT PRIMARY KEY,
+        name VARCHAR(200)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="products",
+        dialect="snowflake",
+        target_warehouse="snowflake"
+    ))
+    assert schema.target_warehouse == "snowflake"
+
+
+def test_import_sql_without_target_warehouse() -> None:
+    """Test that target_warehouse defaults to None when not specified."""
+    sql = """
+    CREATE TABLE products (
+        product_id BIGINT PRIMARY KEY,
+        name VARCHAR(200)
+    );
+    """
+    schema = import_sql(sql, SqlImportOptions(
+        experiment_name="products",
+        dialect="redshift"
+    ))
+    assert schema.target_warehouse is None

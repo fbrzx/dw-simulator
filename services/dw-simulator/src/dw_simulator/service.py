@@ -148,6 +148,7 @@ class ExperimentService:
         sql: str,
         dialect: str = "ansi",
         target_rows: int | None = None,
+        target_warehouse: str | None = None,
     ) -> ExperimentCreateResult:
         """Import SQL DDL and create an experiment."""
 
@@ -158,6 +159,7 @@ class ExperimentService:
                     experiment_name=name,
                     dialect=dialect,
                     default_target_rows=target_rows or DEFAULT_TARGET_ROWS,
+                    target_warehouse=target_warehouse,
                 ),
             )
         except SqlImportError as exc:

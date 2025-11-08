@@ -162,3 +162,70 @@ def test_table_schema_warnings_default_empty_list() -> None:
     schema = parse_experiment_schema(payload)
     assert schema.tables[0].warnings == []
     assert isinstance(schema.tables[0].warnings, list)
+
+
+# US 5.2 Phase 3: Warehouse selection tests
+
+
+def test_experiment_schema_with_target_warehouse_sqlite() -> None:
+    """Test that ExperimentSchema accepts valid sqlite target_warehouse."""
+    payload = build_sample_experiment()
+    payload["target_warehouse"] = "sqlite"
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse == "sqlite"
+
+
+def test_experiment_schema_with_target_warehouse_redshift() -> None:
+    """Test that ExperimentSchema accepts valid redshift target_warehouse."""
+    payload = build_sample_experiment()
+    payload["target_warehouse"] = "redshift"
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse == "redshift"
+
+
+def test_experiment_schema_with_target_warehouse_snowflake() -> None:
+    """Test that ExperimentSchema accepts valid snowflake target_warehouse."""
+    payload = build_sample_experiment()
+    payload["target_warehouse"] = "snowflake"
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse == "snowflake"
+
+
+def test_experiment_schema_target_warehouse_case_insensitive() -> None:
+    """Test that target_warehouse is normalized to lowercase."""
+    payload = build_sample_experiment()
+    payload["target_warehouse"] = "SQLite"
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse == "sqlite"
+
+    payload["target_warehouse"] = "REDSHIFT"
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse == "redshift"
+
+    payload["target_warehouse"] = "SnowFlake"
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse == "snowflake"
+
+
+def test_experiment_schema_invalid_target_warehouse() -> None:
+    """Test that invalid target_warehouse values are rejected."""
+    payload = build_sample_experiment()
+    payload["target_warehouse"] = "invalid_warehouse"
+    with pytest.raises(ValidationError, match="Unsupported warehouse type"):
+        parse_experiment_schema(payload)
+
+
+def test_experiment_schema_target_warehouse_optional() -> None:
+    """Test that target_warehouse is optional and defaults to None."""
+    payload = build_sample_experiment()
+    # Don't include target_warehouse field
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse is None
+
+
+def test_experiment_schema_target_warehouse_null() -> None:
+    """Test that target_warehouse can be explicitly set to null."""
+    payload = build_sample_experiment()
+    payload["target_warehouse"] = None
+    schema = parse_experiment_schema(payload)
+    assert schema.target_warehouse is None

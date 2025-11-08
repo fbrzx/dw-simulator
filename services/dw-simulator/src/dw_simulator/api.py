@@ -47,6 +47,7 @@ class SqlImportPayload(BaseModel):
     sql: str = Field(..., description="SQL text containing CREATE TABLE statements.")
     dialect: str = Field("redshift", description=f"SQL dialect ({', '.join(SUPPORTED_DIALECTS)}).")
     target_rows: int | None = Field(None, ge=1, description="Default target row count per table.")
+    target_warehouse: str | None = Field(None, description="Target warehouse type (sqlite/redshift/snowflake). Defaults to system default.")
 
 
 class QueryExecutePayload(BaseModel):
@@ -91,6 +92,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
                     "table_count": len(table_names),
                     "schema": experiment.schema_json,
                     "warnings": warnings,
+                    "warehouse_type": experiment.warehouse_type,
                 }
             )
         return {"experiments": summaries}
@@ -107,6 +109,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             "name": result.metadata.name,
             "description": result.metadata.description,
             "created_at": result.metadata.created_at.isoformat(),
+            "warehouse_type": result.metadata.warehouse_type,
         }
 
     @app.delete("/api/experiments/{name}")
@@ -219,6 +222,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             sql=payload.sql,
             dialect=payload.dialect,
             target_rows=payload.target_rows,
+            target_warehouse=payload.target_warehouse,
         )
         if not result.success or not result.metadata:
             raise HTTPException(
@@ -230,6 +234,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             "created_at": result.metadata.created_at.isoformat(),
             "dialect": payload.dialect,
             "warnings": list(result.warnings),
+            "warehouse_type": result.metadata.warehouse_type,
         }
 
     @app.post("/api/query/execute", response_model=None)
