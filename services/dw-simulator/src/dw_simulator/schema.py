@@ -63,6 +63,62 @@ class WarehouseType(str):
     SNOWFLAKE = "snowflake"
 
 
+class DistributionType(str):
+    """Supported statistical distribution identifiers."""
+
+    NORMAL = "normal"
+    EXPONENTIAL = "exponential"
+    BETA = "beta"
+
+
+class DistributionConfig(BaseModel):
+    """Configuration describing a statistical distribution and its parameters."""
+
+    type: str = Field(..., description="Distribution identifier (normal/exponential/beta).")
+    parameters: dict[str, float] = Field(
+        default_factory=dict,
+        description="Distribution-specific parameters (e.g., mean/stddev).",
+    )
+
+    @field_validator("type")
+    @classmethod
+    def normalize_type(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {
+            DistributionType.NORMAL,
+            DistributionType.EXPONENTIAL,
+            DistributionType.BETA,
+        }:
+            raise ValueError(f"Unsupported distribution type '{value}'.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_parameters(self) -> "DistributionConfig":
+        params = self.parameters
+        if self.type == DistributionType.NORMAL:
+            self._require_params({"mean", "stddev"}, params)
+            if params["stddev"] <= 0:
+                raise ValueError("Normal distribution requires stddev > 0.")
+        elif self.type == DistributionType.EXPONENTIAL:
+            self._require_params({"lambda"}, params)
+            if params["lambda"] <= 0:
+                raise ValueError("Exponential distribution requires lambda > 0.")
+        elif self.type == DistributionType.BETA:
+            self._require_params({"alpha", "beta"}, params)
+            if params["alpha"] <= 0 or params["beta"] <= 0:
+                raise ValueError("Beta distribution requires alpha > 0 and beta > 0.")
+        return self
+
+    @staticmethod
+    def _require_params(expected: set[str], params: Mapping[str, float]) -> None:
+        missing = expected.difference(params.keys())
+        if missing:
+            raise ValueError(
+                "Distribution configuration missing required parameter(s): "
+                + ", ".join(sorted(missing))
+            )
+
+
 class ColumnSchema(BaseModel):
     """Column definition with optional constraints for generation."""
 
@@ -80,6 +136,12 @@ class ColumnSchema(BaseModel):
     )
     date_start: date | None = Field(default=None, description="Inclusive start for DATE columns.")
     date_end: date | None = Field(default=None, description="Inclusive end for DATE columns.")
+    distribution: DistributionConfig | None = Field(
+        default=None,
+        description=(
+            "Optional statistical distribution configuration applied during synthetic data generation."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -126,6 +188,11 @@ class ColumnSchema(BaseModel):
                 raise ValueError(
                     f"Column '{self.name}' can only define date ranges when data_type is DATE."
                 )
+
+        if self.distribution is not None and self.data_type not in {DataType.INT, DataType.FLOAT}:
+            raise ValueError(
+                "Distribution configuration is only supported for numeric columns (INT or FLOAT)."
+            )
         return self
 
 
@@ -259,4 +326,6 @@ __all__ = [
     "validate_experiment_payload",
     "DataType",
     "WarehouseType",
+    "DistributionConfig",
+    "DistributionType",
 ]

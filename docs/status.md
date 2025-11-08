@@ -192,11 +192,19 @@ The dual-database architecture has been implemented and tested. The system now s
 - **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), data generation, and experiment reset.
 - **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest tests/test_service.py -o addopts="" -p no:cov` (34 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
 
+## In Progress
+
+### US 6.1 – Advanced data generation with statistical distributions (IN PROGRESS)
+- **Step 1 (✅ COMPLETE):** Extended schema model with `DistributionConfig` support on `ColumnSchema`, added validation for numeric columns and required parameters, updated `docs/tech-spec.md`, and introduced new schema unit tests.
+- **Step 2:** Implement generator support for new distributions (normal, exponential, beta) with deterministic seeding and fallbacks.
+- **Step 3:** Add CLI/API/UI handling so distribution options can be supplied via JSON schema and surfaced in responses.
+- **Step 4:** Expand test coverage (unit + integration) to verify distribution enforcement and CLI/API behavior.
+
 ## Backlog
 
 ### Future Enhancements
-- **US 6.1:** Advanced data generation with statistical distributions (integrate SDV library)
 - **US 6.2:** Foreign key relationship enforcement during generation
 - **US 6.3:** Performance optimization for 10M+ row datasets
 - **US 6.4:** Data lineage tracking and visualization
 - **US 6.5:** Export experiments as Docker images for reproducibility
+

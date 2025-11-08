@@ -198,6 +198,51 @@ def test_experiment_schema_target_warehouse_case_insensitive() -> None:
     schema = parse_experiment_schema(payload)
     assert schema.target_warehouse == "sqlite"
 
+
+def test_column_schema_accepts_distribution_config() -> None:
+    """ColumnSchema accepts valid distribution configuration for numeric columns."""
+    column = ColumnSchema(
+        name="amount",
+        data_type="FLOAT",
+        distribution={
+            "type": "normal",
+            "parameters": {"mean": 10.0, "stddev": 2.5},
+        },
+    )
+    assert column.distribution is not None
+    assert column.distribution.type == "normal"
+    assert column.distribution.parameters == {"mean": 10.0, "stddev": 2.5}
+
+
+def test_column_schema_distribution_requires_numeric_column() -> None:
+    """Distribution config is rejected for non-numeric data types."""
+    with pytest.raises(ValidationError, match="numeric columns"):
+        ColumnSchema(
+            name="category",
+            data_type="VARCHAR",
+            distribution={"type": "normal", "parameters": {"mean": 0, "stddev": 1}},
+        )
+
+
+def test_column_schema_distribution_requires_expected_parameters() -> None:
+    """Distribution config validates parameter requirements per distribution type."""
+    with pytest.raises(ValidationError, match="stddev"):
+        ColumnSchema(
+            name="amount",
+            data_type="FLOAT",
+            distribution={"type": "normal", "parameters": {"mean": 10}},
+        )
+
+
+def test_column_schema_distribution_rejects_unknown_type() -> None:
+    """Distribution config rejects unsupported distribution types."""
+    with pytest.raises(ValidationError, match="Unsupported distribution type"):
+        ColumnSchema(
+            name="amount",
+            data_type="FLOAT",
+            distribution={"type": "lognormal", "parameters": {"mean": 0, "sigma": 1}},
+        )
+
     payload["target_warehouse"] = "REDSHIFT"
     schema = parse_experiment_schema(payload)
     assert schema.target_warehouse == "redshift"
