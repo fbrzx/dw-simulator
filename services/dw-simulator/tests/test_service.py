@@ -430,6 +430,58 @@ def test_create_experiment_from_sql_invalid_dialect() -> None:
     assert "Unsupported dialect" in result.errors[0]
 
 
+def test_summarize_distribution_configs_returns_sorted_parameters() -> None:
+    """Distribution summaries include all configured columns with sorted parameters."""
+
+    schema = ExperimentSchema(
+        name="DistributionSummary",
+        description=None,
+        tables=[
+            TableSchema(
+                name="metrics",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(
+                        name="latency",
+                        data_type="FLOAT",
+                        distribution={
+                            "type": "exponential",
+                            "parameters": {"lambda": 1.5},
+                        },
+                    ),
+                    ColumnSchema(
+                        name="score",
+                        data_type="INT",
+                        min_value=0,
+                        max_value=100,
+                        distribution={
+                            "type": "normal",
+                            "parameters": {"stddev": 5, "mean": 50},
+                        },
+                    ),
+                ],
+            )
+        ],
+    )
+
+    summary = ExperimentService.summarize_distribution_configs(schema)
+
+    assert summary == [
+        {
+            "table": "metrics",
+            "column": "latency",
+            "type": "exponential",
+            "parameters": {"lambda": 1.5},
+        },
+        {
+            "table": "metrics",
+            "column": "score",
+            "type": "normal",
+            "parameters": {"mean": 50, "stddev": 5},
+        },
+    ]
+
+
 def test_generate_data_creates_generation_run(tmp_path: Path) -> None:
     """Test that generate_data creates a generation run record."""
     metadata = build_metadata()

@@ -203,6 +203,60 @@ def test_list_experiments_includes_distribution_summary(client: TestClient) -> N
     ]
 
 
+def test_list_experiments_distribution_summary_multiple_columns(client: TestClient) -> None:
+    """Distribution summaries include multiple columns with sorted parameters."""
+
+    schema = {
+        "name": "DistributionApiMulti",
+        "tables": [
+            {
+                "name": "metrics",
+                "target_rows": 5,
+                "columns": [
+                    {
+                        "name": "score",
+                        "data_type": "INT",
+                        "distribution": {
+                            "type": "normal",
+                            "parameters": {"stddev": 7, "mean": 40},
+                        },
+                    },
+                    {
+                        "name": "latency",
+                        "data_type": "FLOAT",
+                        "distribution": {
+                            "type": "exponential",
+                            "parameters": {"lambda": 1.25},
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    create_response = client.post("/api/experiments", json=schema)
+    assert create_response.status_code == 201
+
+    list_response = client.get("/api/experiments")
+    assert list_response.status_code == 200
+    experiments = list_response.json()["experiments"]
+
+    assert experiments[0]["distributions"] == [
+        {
+            "table": "metrics",
+            "column": "score",
+            "type": "normal",
+            "parameters": {"mean": 40, "stddev": 7},
+        },
+        {
+            "table": "metrics",
+            "column": "latency",
+            "type": "exponential",
+            "parameters": {"lambda": 1.25},
+        },
+    ]
+
+
 def test_reset_experiment_success(client: TestClient) -> None:
     """Test successful experiment reset via API."""
     # Create experiment first
