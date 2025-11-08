@@ -409,6 +409,59 @@ class ExperimentSchema(BaseModel):
     def total_rows(self) -> int:
         return sum(table.target_rows for table in self.tables)
 
+    def validate_generation_constraints(self) -> list[str]:
+        """
+        Validate that the schema can realistically generate the requested data.
+
+        Returns a list of warning messages about potentially problematic constraints.
+        """
+        warnings: list[str] = []
+
+        # Estimate max unique values for different data types without faker rules
+        DEFAULT_UNIQUE_LIMITS = {
+            DataType.VARCHAR: 500,  # faker.word() has ~500 unique common words
+            DataType.INT: 1_000_000,  # Large range, unlikely to be a problem
+            DataType.FLOAT: 10_000_000,  # Very large range
+            DataType.DATE: 2000,  # Default range is ~6 years = ~2000 days
+            DataType.BOOLEAN: 2,  # Only 2 possible values
+        }
+
+        for table in self.tables:
+            # Check for unique columns that might not generate enough unique values
+            for column in table.columns:
+                if not column.is_unique:
+                    continue
+
+                # Skip columns with faker rules (they likely have better variety)
+                if column.faker_rule:
+                    continue
+
+                # Skip INT columns with explicit min/max (user-controlled range)
+                if column.data_type == DataType.INT and (column.min_value is not None or column.max_value is not None):
+                    continue
+
+                # Get the estimated limit for this data type
+                estimated_limit = DEFAULT_UNIQUE_LIMITS.get(column.data_type, 1_000_000)
+
+                # For VARCHAR, consider the length (shorter = fewer combos)
+                if column.data_type == DataType.VARCHAR:
+                    varchar_len = column.varchar_length or 255
+                    # faker.word() typically returns English words truncated to varchar_length
+                    # Very short lengths severely limit variety
+                    if varchar_len <= 4:
+                        estimated_limit = 100  # 2-4 chars: very limited
+                    elif varchar_len <= 10:
+                        estimated_limit = 300  # 5-10 chars: limited variety
+
+                # Check if target_rows exceeds the estimated limit
+                if table.target_rows > estimated_limit:
+                    warnings.append(
+                        f"Table '{table.name}' column '{column.name}': Requesting {table.target_rows} unique {column.data_type} values "
+                        f"may fail. Recommended: reduce target_rows to ≤{estimated_limit} or add a faker_rule for better variety."
+                    )
+
+        return warnings
+
 
 def parse_experiment_schema(payload: Mapping[str, Any] | str) -> ExperimentSchema:
     """

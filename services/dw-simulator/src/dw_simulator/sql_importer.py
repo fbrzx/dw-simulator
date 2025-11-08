@@ -104,11 +104,42 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
     if not tables:
         raise SqlImportError("No CREATE TABLE statements were found in the supplied SQL.")
 
-    return ExperimentSchema(
+    schema = ExperimentSchema(
         name=options.experiment_name,
         tables=tables,
         target_warehouse=options.target_warehouse,
     )
+
+    # Validate generation constraints and auto-adjust target_rows if needed
+    constraint_warnings = schema.validate_generation_constraints()
+    for warning in constraint_warnings:
+        # Extract table name and recommended limit from warning
+        if "Table '" in warning and "reduce target_rows to ≤" in warning:
+            table_name = warning.split("Table '")[1].split("'")[0]
+            # Extract recommended limit (format: "reduce target_rows to ≤100")
+            recommended_str = warning.split("reduce target_rows to ≤")[1].split(" ")[0]
+            try:
+                recommended_limit = int(recommended_str)
+                # Find the table and auto-adjust if target_rows exceeds recommendation
+                for table in schema.tables:
+                    if table.name == table_name and table.target_rows > recommended_limit:
+                        old_rows = table.target_rows
+                        table.target_rows = recommended_limit
+                        # Update warning to reflect auto-adjustment
+                        adjusted_warning = (
+                            f"Table '{table_name}': Automatically reduced target_rows from {old_rows} to {recommended_limit} "
+                            f"to ensure unique value generation succeeds."
+                        )
+                        table.warnings.append(adjusted_warning)
+                        break
+            except (ValueError, IndexError):
+                # If we can't parse the limit, just add the warning as-is
+                for table in schema.tables:
+                    if table.name == table_name:
+                        table.warnings.append(warning)
+                        break
+
+    return schema
 
 
 def _extract_columns_and_constraints(schema_node: exp.Schema) -> tuple[list[dict], dict[str, list[str]], dict[str, dict]]:
@@ -336,13 +367,26 @@ def _map_data_type(data_type: exp.DataType) -> tuple[str, dict]:
 
 
 def _normalize_identifier(identifier: exp.Expression) -> str:
+    """
+    Normalize an identifier, stripping schema prefixes and quotes.
+
+    For schema-qualified names like "public.table_name", returns just "table_name".
+    """
     if isinstance(identifier, exp.Identifier):
-        return identifier.name
-    if isinstance(identifier, exp.Table):
-        return identifier.name
-    if isinstance(identifier, exp.Column):
-        return identifier.this.name
-    return identifier.sql().strip('"')
+        name = identifier.name
+    elif isinstance(identifier, exp.Table):
+        name = identifier.name
+    elif isinstance(identifier, exp.Column):
+        name = identifier.this.name
+    else:
+        name = identifier.sql().strip('"')
+
+    # Strip schema prefix if present (e.g., "public.table_name" -> "table_name")
+    if '.' in name:
+        parts = name.split('.', 1)
+        return parts[1] if len(parts) > 1 else parts[0]
+
+    return name
 
 
 __all__ = ["import_sql", "SqlImportOptions", "SqlImportError", "SUPPORTED_DIALECTS", "DEFAULT_TARGET_ROWS"]
