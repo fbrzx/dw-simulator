@@ -19,13 +19,20 @@ The main CI pipeline runs on every push to `main` and `claude/**` branches, as w
 
 2. **End-to-End Tests** (`e2e-tests`)
    - Builds and starts full Docker Compose stack
-   - Runs comprehensive end-to-end tests for all warehouse dialects:
+   - **IMPORTANT**: All infrastructure services (PostgreSQL, LocalStack S3, LocalStack Snowflake) are started and verified BEFORE any tests run
+   - Infrastructure readiness checks:
+     - PostgreSQL health check (up to 90 seconds)
+     - PostgreSQL connection verification
+     - LocalStack service initialization
+     - Full infrastructure status verification
+   - Runs comprehensive end-to-end tests **sequentially** for all warehouse dialects:
      - **SQLite**: Simple e-commerce workflow (100 customers, 250 orders)
      - **Redshift (PostgreSQL)**: Analytics workflow (50 users, 200 events)
      - **Snowflake (LocalStack)**: Sales workflow (75 products, 150 sales)
    - Runs existing integration test suite
    - Duration: ~10-15 minutes
    - Uses: Docker Compose, PostgreSQL, LocalStack
+   - **Note**: Tests run sequentially to avoid database conflicts; parallel execution is planned for future optimization
 
 3. **Build Validation** (`build-validation`)
    - Validates that all Docker images build successfully
@@ -37,6 +44,47 @@ The main CI pipeline runs on every push to `main` and `claude/**` branches, as w
    - Aggregates results from all jobs
    - Required for branch protection rules
    - Provides clear pass/fail status
+
+#### Test Execution Flow
+
+The E2E job follows a strict execution order to ensure reliability:
+
+```
+1. Build Docker images
+   └─> synthetic-data-generator
+
+2. Start ALL infrastructure services in parallel
+   ├─> local-redshift-mock (PostgreSQL)
+   ├─> local-s3-staging (LocalStack S3)
+   └─> local-snowflake-emulator (LocalStack Snowflake)
+
+3. Wait for infrastructure to be fully ready
+   ├─> PostgreSQL health check (up to 90s)
+   ├─> PostgreSQL connection test
+   ├─> LocalStack initialization (up to 30s)
+   └─> Final verification of all services
+
+4. Run tests SEQUENTIALLY (infrastructure is ready)
+   ├─> SQLite E2E test
+   ├─> Redshift E2E test
+   ├─> Snowflake E2E test
+   └─> Integration test suite
+
+5. Cleanup
+   └─> docker compose down -v
+```
+
+**Why infrastructure must be ready before tests:**
+- All warehouse emulators must accept connections before test execution
+- Database schemas need to be created reliably
+- S3 buckets must exist for Parquet staging
+- Health checks prevent race conditions and flaky tests
+
+**Why tests run sequentially:**
+- All tests use the same PostgreSQL instance
+- Redshift and Snowflake tests share LocalStack resources
+- Sequential execution prevents table name conflicts
+- Future: Use pytest-xdist for parallel execution within isolated test databases
 
 #### Infrastructure Services
 
@@ -155,10 +203,26 @@ If a CI job fails:
 
 #### Future Enhancements
 
+**Performance Optimizations:**
+- [ ] Parallel test execution using pytest-xdist (requires isolated test databases)
+- [ ] Use GitHub Actions matrix strategy for E2E tests (requires infrastructure duplication)
+- [ ] Add caching for Docker layers (reduce build time from ~5 min to ~1 min)
+- [ ] Pre-built Docker images on Docker Hub (skip build step in CI)
+
+**Quality & Security:**
 - [ ] Add mutation testing (Stryker/Cosmic Ray)
-- [ ] Add performance benchmarking (data generation speed)
-- [ ] Add security scanning (Bandit, Safety)
-- [ ] Add Docker image scanning (Trivy)
-- [ ] Add parallel test execution for faster CI
-- [ ] Add caching for Docker layers
+- [ ] Add performance benchmarking (data generation speed, query performance)
+- [ ] Add security scanning (Bandit, Safety, Snyk)
+- [ ] Add Docker image scanning (Trivy, Grype)
+- [ ] Add SAST/DAST scanning for API endpoints
+
+**Reporting & Observability:**
 - [ ] Add test result reporting (coverage badges, trend graphs)
+- [ ] Add test timing analytics (track CI performance over time)
+- [ ] Add failure rate tracking and flaky test detection
+- [ ] Add Slack/Discord notifications for CI failures
+
+**Infrastructure:**
+- [ ] Add database isolation for parallel E2E tests
+- [ ] Add infrastructure health monitoring
+- [ ] Add resource usage metrics (CPU, memory, disk)

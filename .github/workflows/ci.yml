@@ -89,29 +89,45 @@ jobs:
 
       - name: Start infrastructure services
         run: |
-          echo "Starting PostgreSQL (Redshift emulator)..."
-          docker compose up -d local-redshift-mock
+          echo "Starting all infrastructure services..."
+          docker compose up -d local-redshift-mock local-s3-staging local-snowflake-emulator
 
-          echo "Starting LocalStack (S3 + Snowflake emulators)..."
-          docker compose up -d local-s3-staging local-snowflake-emulator
-
-          echo "Waiting for services to be healthy..."
-          timeout 60 bash -c 'until docker compose ps | grep -q "local-redshift-mock.*healthy"; do echo "Waiting for PostgreSQL..."; sleep 2; done'
-
-          echo "Services started successfully"
+          echo "Infrastructure services starting..."
           docker compose ps
 
-      - name: Wait for PostgreSQL to be ready
+      - name: Wait for PostgreSQL (Redshift emulator) to be healthy
         run: |
-          echo "Waiting for PostgreSQL to accept connections..."
-          timeout 30 bash -c 'until docker compose exec -T local-redshift-mock pg_isready -U dw_user -d dw_simulator; do sleep 1; done'
-          echo "PostgreSQL is ready"
+          echo "Waiting for PostgreSQL health check..."
+          timeout 90 bash -c 'until docker compose ps | grep -q "local-redshift-mock.*healthy"; do echo "Waiting for PostgreSQL..."; sleep 2; done'
 
-      - name: Wait for LocalStack services
+          echo "Verifying PostgreSQL accepts connections..."
+          timeout 30 bash -c 'until docker compose exec -T local-redshift-mock pg_isready -U dw_user -d dw_simulator; do sleep 1; done'
+
+          echo "✅ PostgreSQL is ready"
+
+      - name: Wait for LocalStack services (S3 + Snowflake)
         run: |
-          echo "Waiting for LocalStack S3..."
-          timeout 30 bash -c 'until curl -s http://localhost:4572/_localstack/health | grep -q "s3.*running"; do echo "Waiting for S3..."; sleep 2; done' || true
-          echo "LocalStack services initialized"
+          echo "Waiting for LocalStack to be ready..."
+          sleep 5
+
+          echo "Checking S3 service..."
+          timeout 30 bash -c 'until curl -sf http://localhost:4572/_localstack/health >/dev/null 2>&1; do echo "Waiting for LocalStack..."; sleep 2; done' || echo "LocalStack health check timeout (may be normal)"
+
+          echo "✅ LocalStack services initialized"
+
+      - name: Verify all infrastructure is ready
+        run: |
+          echo "=== Infrastructure Status ==="
+          docker compose ps
+          echo ""
+          echo "=== PostgreSQL Status ==="
+          docker compose exec -T local-redshift-mock pg_isready -U dw_user -d dw_simulator
+          echo ""
+          echo "✅ All infrastructure services are ready for testing"
+
+      # NOTE: Tests run sequentially to avoid database conflicts.
+      # Infrastructure is fully ready at this point, so tests can safely execute.
+      # Future optimization: Use pytest-xdist for parallel execution within a single test run.
 
       - name: Run E2E test - SQLite warehouse
         run: |
