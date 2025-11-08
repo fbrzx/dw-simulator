@@ -1,0 +1,230 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+  pull_request:
+    branches:
+      - main
+
+env:
+  # Docker Compose configuration
+  COMPOSE_FILE: docker-compose.yml
+  # Test configuration
+  PYTHONPATH: src
+  # LocalStack config (optional - only needed for paid features)
+  LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+
+jobs:
+  # =============================================================================
+  # Unit Tests Job - Fast feedback without Docker infrastructure
+  # =============================================================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'services/dw-simulator/pyproject.toml'
+
+      - name: Install dependencies
+        run: |
+          cd services/dw-simulator
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run linting (ruff)
+        run: |
+          cd services/dw-simulator
+          pip install ruff
+          ruff check src tests || true
+
+      - name: Run unit tests (excluding integration tests)
+        run: |
+          cd services/dw-simulator
+          PYTHONPATH=src pytest -v \
+            --tb=short \
+            -o addopts="" \
+            -p no:cov \
+            -m "not integration" \
+            tests/
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: services/dw-simulator/pytest-results.xml
+          if-no-files-found: ignore
+
+  # =============================================================================
+  # End-to-End Tests Job - Full stack with Docker Compose
+  # =============================================================================
+  e2e-tests:
+    name: E2E Tests (All Warehouses)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker images
+        run: |
+          echo "Building synthetic-data-generator image..."
+          docker compose build synthetic-data-generator
+
+      - name: Start infrastructure services
+        run: |
+          echo "Starting PostgreSQL (Redshift emulator)..."
+          docker compose up -d local-redshift-mock
+
+          echo "Starting LocalStack (S3 + Snowflake emulators)..."
+          docker compose up -d local-s3-staging local-snowflake-emulator
+
+          echo "Waiting for services to be healthy..."
+          timeout 60 bash -c 'until docker compose ps | grep -q "local-redshift-mock.*healthy"; do echo "Waiting for PostgreSQL..."; sleep 2; done'
+
+          echo "Services started successfully"
+          docker compose ps
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to accept connections..."
+          timeout 30 bash -c 'until docker compose exec -T local-redshift-mock pg_isready -U dw_user -d dw_simulator; do sleep 1; done'
+          echo "PostgreSQL is ready"
+
+      - name: Wait for LocalStack services
+        run: |
+          echo "Waiting for LocalStack S3..."
+          timeout 30 bash -c 'until curl -s http://localhost:4572/_localstack/health | grep -q "s3.*running"; do echo "Waiting for S3..."; sleep 2; done' || true
+          echo "LocalStack services initialized"
+
+      - name: Run E2E test - SQLite warehouse
+        run: |
+          echo "Running SQLite end-to-end test..."
+          docker compose run --rm \
+            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:////data/e2e_sqlite.db" \
+            synthetic-data-generator \
+            pytest -v --tb=short -o addopts="" -p no:cov \
+            tests/test_e2e_warehouses.py::test_e2e_sqlite_ecommerce_workflow
+
+      - name: Run E2E test - Redshift (PostgreSQL) warehouse
+        run: |
+          echo "Running Redshift (PostgreSQL) end-to-end test..."
+          docker compose run --rm \
+            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:///:memory:" \
+            -e DW_SIMULATOR_REDSHIFT_URL="postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator" \
+            synthetic-data-generator \
+            pytest -v --tb=short -o addopts="" -p no:cov \
+            -m integration \
+            tests/test_e2e_warehouses.py::test_e2e_redshift_analytics_workflow
+
+      - name: Run E2E test - Snowflake warehouse
+        run: |
+          echo "Running Snowflake end-to-end test..."
+          docker compose run --rm \
+            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:///:memory:" \
+            -e DW_SIMULATOR_SNOWFLAKE_URL="snowflake://test:test@local-snowflake-emulator:4566/test?account=test&warehouse=test" \
+            synthetic-data-generator \
+            pytest -v --tb=short -o addopts="" -p no:cov \
+            -m integration \
+            tests/test_e2e_warehouses.py::test_e2e_snowflake_sales_workflow
+
+      - name: Run all integration tests
+        run: |
+          echo "Running full integration test suite..."
+          docker compose run --rm \
+            -e DW_SIMULATOR_TARGET_DB_URL="sqlite:////data/integration_all.db" \
+            synthetic-data-generator \
+            pytest -v --tb=short -o addopts="" -p no:cov \
+            tests/test_integration.py
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "=== PostgreSQL Logs ==="
+          docker compose logs local-redshift-mock | tail -100
+          echo ""
+          echo "=== LocalStack S3 Logs ==="
+          docker compose logs local-s3-staging | tail -100
+          echo ""
+          echo "=== LocalStack Snowflake Logs ==="
+          docker compose logs local-snowflake-emulator | tail -100
+
+      - name: Cleanup Docker resources
+        if: always()
+        run: |
+          docker compose down -v
+          docker compose rm -f
+
+  # =============================================================================
+  # Build Validation Job - Ensure Docker images build successfully
+  # =============================================================================
+  build-validation:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build all services
+        run: |
+          echo "Building all Docker services..."
+          docker compose build --parallel
+
+      - name: Verify images were created
+        run: |
+          echo "Verifying Docker images..."
+          docker images | grep -E "dw-simulator|postgres|localstack"
+
+      - name: Test basic container startup
+        run: |
+          echo "Testing container startup..."
+          docker compose up -d
+          sleep 10
+          docker compose ps
+          docker compose down -v
+
+  # =============================================================================
+  # Status Check - Aggregate results for branch protection
+  # =============================================================================
+  ci-status:
+    name: CI Status Check
+    runs-on: ubuntu-latest
+    needs: [unit-tests, e2e-tests, build-validation]
+    if: always()
+
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [[ "${{ needs.unit-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.e2e-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.build-validation.result }}" == "success" ]]; then
+            echo "✅ All CI checks passed!"
+            exit 0
+          else
+            echo "❌ CI checks failed:"
+            echo "  - Unit Tests: ${{ needs.unit-tests.result }}"
+            echo "  - E2E Tests: ${{ needs.e2e-tests.result }}"
+            echo "  - Build Validation: ${{ needs.build-validation.result }}"
+            exit 1
+          fi
