@@ -30,9 +30,21 @@ ui:
 	cd services/web-ui && python -m http.server 4173
 
 clean:
+	@echo "Cleaning up warehouse databases..."
+	@docker compose exec -T local-redshift-mock psql -U dw_user -d dw_simulator -c "\
+		DO \$$\$$ DECLARE r RECORD; \
+		BEGIN \
+			FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname='public') LOOP \
+				EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE'; \
+			END LOOP; \
+		END \$$\$$;" 2>/dev/null || true
+	@echo "Stopping containers and removing volumes..."
 	docker compose down -v || true
-	rm -rf data/sqlite
+	@echo "Removing data directory..."
+	rm -rf data
+	@echo "Removing Python cache and coverage files..."
 	rm -rf $(PY_SERVICE_DIR)/.pytest_cache $(PY_SERVICE_DIR)/.coverage
+	@echo "✅ Clean complete!"
 
 # =============================================================================
 # Test Runner Targets - Run tests in Docker with full infrastructure
