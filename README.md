@@ -49,12 +49,14 @@ is implemented.
 ## Make targets
 
 ```bash
-make install   # pip install -e services/dw-simulator
-make test      # run PYTHONPATH=src pytest
-make build     # docker compose build
-make up        # docker compose up
-make api       # run the FastAPI server locally (dw-sim api …)
-make ui        # serve the static web UI via python -m http.server
+make install          # pip install -e services/dw-simulator
+make test             # run PYTHONPATH=src pytest
+make build            # docker compose build
+make up               # docker compose up
+make api              # run the FastAPI server locally (dw-sim api …)
+make ui               # serve the static web UI via python -m http.server
+make clean            # cleans all local data, including generated files
+make test-runner-all  # spins a test runner docker image and runs all tests
 ```
 
 ## Managing experiments
