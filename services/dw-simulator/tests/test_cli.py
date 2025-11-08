@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from dw_simulator import __version__
-from dw_simulator.cli import app
+from dw_simulator.cli import app, _summarize_distribution_columns
 
 runner = CliRunner()
 
@@ -111,6 +111,47 @@ def test_experiment_create_command_reports_distributions(
     assert "normal" in result.stdout
     assert "mean=50" in result.stdout
     assert "stddev=5" in result.stdout
+
+
+def test_summarize_distribution_columns_helper_handles_invalid_json() -> None:
+    """Helper safely handles invalid JSON and formats parameter order."""
+
+    assert _summarize_distribution_columns("not json") == []
+
+    schema = {
+        "name": "HelperSchema",
+        "tables": [
+            {
+                "name": "metrics",
+                "target_rows": 5,
+                "columns": [
+                    {
+                        "name": "score",
+                        "data_type": "INT",
+                        "distribution": {
+                            "type": "normal",
+                            "parameters": {"stddev": 5, "mean": 25},
+                        },
+                    },
+                    {
+                        "name": "latency",
+                        "data_type": "FLOAT",
+                        "distribution": {
+                            "type": "exponential",
+                            "parameters": {"lambda": 2.0},
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    lines = _summarize_distribution_columns(json.dumps(schema))
+
+    assert lines == [
+        " - metrics.score: normal (mean=25, stddev=5)",
+        " - metrics.latency: exponential (lambda=2)",
+    ]
 
 
 def test_experiment_create_command_handles_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
