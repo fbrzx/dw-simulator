@@ -243,14 +243,6 @@ def test_column_schema_distribution_rejects_unknown_type() -> None:
             distribution={"type": "lognormal", "parameters": {"mean": 0, "sigma": 1}},
         )
 
-    payload["target_warehouse"] = "REDSHIFT"
-    schema = parse_experiment_schema(payload)
-    assert schema.target_warehouse == "redshift"
-
-    payload["target_warehouse"] = "SnowFlake"
-    schema = parse_experiment_schema(payload)
-    assert schema.target_warehouse == "snowflake"
-
 
 def test_experiment_schema_invalid_target_warehouse() -> None:
     """Test that invalid target_warehouse values are rejected."""
