@@ -98,12 +98,16 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All 123 tests passing (34 persistence tests, 89 total across all modules)
 - Coverage: persistence.py at 89%, close to 95% target
 
-**Step 3: Service layer - Integrate loading into generation workflow (⏳ pending)**
-- Update `ExperimentService.generate_data()` to:
-  - After successful Parquet generation, automatically call `persistence.load_generation_run(run_id)`
-  - Update generation run metadata with loading status
-  - Return loading errors if they occur (generation succeeds but loading fails)
-- Tests: `tests/test_service.py::test_generate_with_auto_load`
+**Step 3: Service layer - Integrate loading into generation workflow (✅ COMPLETE)**
+- Updated `ExperimentService.generate_data()` to:
+  - Normalize and record the Parquet output directory before kicking off generation so persistence metadata has the correct path.
+  - Automatically call `persistence.load_generation_run(run_id)` after a successful generation run and persist combined generated/loaded row counts.
+  - Surface load failures back to callers while marking the generation run as failed with detailed context.
+- Added regression coverage in `tests/test_service.py`:
+  - `test_generate_data_success`
+  - `test_generate_data_completes_run_on_success`
+  - `test_generate_data_creates_generation_run`
+  - `test_generate_data_reports_load_failure`
 - Coverage target: 90%
 
 **Step 4: Service layer - Manual load operation (⏳ pending)**
@@ -140,14 +144,14 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All tests passing: `PYTHONPATH=src pytest --ignore=tests/test_integration.py` (target: 120+ tests)
 
 ## Recent Work
-- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 2 by implementing `load_generation_run()` orchestration method with 7 comprehensive tests. The method loads all Parquet files from a generation run into database tables. Next up: Step 3 integration into the generation workflow.
+- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 3 by wiring automatic Parquet loading into `ExperimentService.generate_data()`, persisting combined generated/loaded row counts, and surfacing load failures. Added focused unit tests for the happy path, metadata updates, and failure handling. Next up: Step 4 manual load operation.
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.
 - **Composite primary key support (US 1.4):** Complete end-to-end handling of composite primary keys with surrogate `_row_id` generation, comprehensive warnings across CLI/API/UI, and full documentation.
 - **SQL import & dialect support:** sqlglot-backed parser, CLI command `dw-sim experiment import-sql`, REST endpoint `POST /api/experiments/import-sql`, and UI toggle for JSON vs SQL creation.
 - **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), data generation, and experiment reset.
-- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest --ignore=tests/test_integration.py` (114 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
+- **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest tests/test_service.py -o addopts="" -p no:cov` (34 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
 
 ## Backlog
 All current user stories complete. Ready for next epic or feature requests.
