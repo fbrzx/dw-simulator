@@ -287,6 +287,44 @@ dw-sim experiment generate ecommerce_experiment
 Once you've generated data for an experiment, you can query it using standard SQL.
 The simulator provides multiple interfaces for executing queries and exporting results.
 
+### Data loading behavior
+
+**Automatic loading:**
+When you generate data using `dw-sim experiment generate`, the generated Parquet files are **automatically loaded** into the local warehouse tables. This means you can immediately query the data without any additional steps:
+
+```bash
+# Generate data (auto-loads into warehouse)
+dw-sim experiment generate my_experiment
+
+# Query immediately
+dw-sim query execute "SELECT COUNT(*) FROM my_experiment__customers"
+```
+
+**Manual loading:**
+If you need to reload data (for example, after resetting an experiment), you can use the `load` command:
+
+```bash
+# Load data from the most recent generation run
+dw-sim experiment load my_experiment
+
+# Load data from a specific generation run
+dw-sim experiment load my_experiment --run-id 2
+```
+
+You can also load data via the API:
+
+```bash
+# Load most recent run
+curl -X POST http://localhost:8000/api/experiments/my_experiment/load \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Load specific run
+curl -X POST http://localhost:8000/api/experiments/my_experiment/load \
+  -H "Content-Type: application/json" \
+  -d '{"run_id": 2}'
+```
+
 ### Executing SQL queries
 
 **Query via CLI:**

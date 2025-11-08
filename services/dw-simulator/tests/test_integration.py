@@ -465,3 +465,125 @@ def test_integration_multi_table_generation(service: ExperimentService, db_engin
     assert len(customers_df) == 50
     assert len(orders_df) == 200
     assert len(products_df) == 30
+
+
+def test_integration_auto_load_and_query(service: ExperimentService, db_engine: Engine, tmp_path: Path) -> None:
+    """
+    US 5.1 End-to-end: Verify auto-load after generation and query access to loaded data.
+
+    Given an experiment is created and data is generated,
+    When generation completes successfully,
+    Then the data is automatically loaded into warehouse tables,
+    And SQL queries return the correct row counts.
+    """
+    schema = {
+        "name": "AutoLoadTest",
+        "tables": [
+            {
+                "name": "customers",
+                "target_rows": 50,
+                "columns": [
+                    {"name": "customer_id", "data_type": "INT", "is_unique": True},
+                    {"name": "email", "data_type": "VARCHAR", "varchar_length": 100},
+                ],
+            },
+            {
+                "name": "orders",
+                "target_rows": 120,
+                "columns": [
+                    {"name": "order_id", "data_type": "INT", "is_unique": True},
+                    {"name": "amount", "data_type": "FLOAT"},
+                ],
+            },
+        ],
+    }
+
+    # Create experiment
+    create_result = service.create_experiment_from_payload(schema)
+    assert create_result.success is True, f"Failed to create experiment: {create_result.errors}"
+
+    # Generate data (should auto-load into DB tables)
+    output_dir = tmp_path / "output"
+    gen_result = service.generate_data("AutoLoadTest", output_dir=output_dir, seed=42)
+    assert gen_result.success is True, f"Failed to generate data: {gen_result.errors}"
+
+    # Verify data was auto-loaded by querying the tables
+    query_result = service.execute_query("SELECT COUNT(*) FROM autoloadtest__customers")
+    assert query_result.success is True, f"Failed to query customers: {query_result.errors}"
+    assert query_result.result is not None
+    assert query_result.result.rows[0][0] == 50, "Expected 50 customers in DB"
+
+    query_result = service.execute_query("SELECT COUNT(*) FROM autoloadtest__orders")
+    assert query_result.success is True, f"Failed to query orders: {query_result.errors}"
+    assert query_result.result is not None
+    assert query_result.result.rows[0][0] == 120, "Expected 120 orders in DB"
+
+    # Verify we can query actual data (not just counts)
+    query_result = service.execute_query("SELECT customer_id, email FROM autoloadtest__customers LIMIT 5")
+    assert query_result.success is True
+    assert query_result.result is not None
+    assert len(query_result.result.rows) == 5
+    assert query_result.result.columns == ["customer_id", "email"]
+
+
+def test_integration_manual_load_command(service: ExperimentService, db_engine: Engine, tmp_path: Path) -> None:
+    """
+    US 5.1 AC 3: Verify manual load command reloads data from existing generation run.
+
+    Given an experiment has generated data,
+    When a user manually invokes the load command,
+    Then the data is (re)loaded into the warehouse tables,
+    And subsequent queries reflect the loaded data.
+    """
+    schema = {
+        "name": "ManualLoadTest",
+        "tables": [
+            {
+                "name": "products",
+                "target_rows": 75,
+                "columns": [
+                    {"name": "product_id", "data_type": "INT", "is_unique": True},
+                    {"name": "name", "data_type": "VARCHAR", "varchar_length": 100},
+                ],
+            },
+        ],
+    }
+
+    # Create experiment
+    create_result = service.create_experiment_from_payload(schema)
+    assert create_result.success is True
+
+    # Generate data (auto-loads)
+    output_dir = tmp_path / "output"
+    gen_result = service.generate_data("ManualLoadTest", output_dir=output_dir, seed=123)
+    assert gen_result.success is True
+
+    # Verify initial auto-load worked
+    query_result = service.execute_query("SELECT COUNT(*) FROM manualloadtest__products")
+    assert query_result.success is True
+    assert query_result.result.rows[0][0] == 75
+
+    # Reset the experiment (clears tables without deleting schema)
+    reset_result = service.reset_experiment("ManualLoadTest")
+    assert reset_result.success is True
+
+    # Verify tables are now empty
+    query_result = service.execute_query("SELECT COUNT(*) FROM manualloadtest__products")
+    assert query_result.success is True
+    assert query_result.result.rows[0][0] == 0, "Table should be empty after reset"
+
+    # Manually load data from the existing generation run
+    load_result = service.load_experiment_data("ManualLoadTest", run_id=1)
+    assert load_result.success is True, f"Manual load failed: {load_result.errors}"
+    assert load_result.loaded_tables == 1
+    assert load_result.row_counts["products"] == 75
+
+    # Verify data is back after manual load
+    query_result = service.execute_query("SELECT COUNT(*) FROM manualloadtest__products")
+    assert query_result.success is True
+    assert query_result.result.rows[0][0] == 75, "Expected 75 products after manual load"
+
+    # Verify we can query actual data
+    query_result = service.execute_query("SELECT product_id, name FROM manualloadtest__products LIMIT 3")
+    assert query_result.success is True
+    assert len(query_result.result.rows) == 3

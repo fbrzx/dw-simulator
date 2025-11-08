@@ -159,6 +159,32 @@ Set `DW_SIMULATOR_DATA_ROOT=/custom/data/path` if you want those artifacts somew
 - Unique columns contain zero duplicates (US 2.1 AC 2)
 - Date values fall within specified ranges (US 2.1 AC 3)
 
+**Data loading:**
+When generation completes successfully, the Parquet files are **automatically loaded** into the local warehouse tables. This means you can immediately query the data using the query interface (see below) without any additional steps.
+
+#### Load experiment data
+
+If you need to reload data (for example, after resetting an experiment), you can use the `load` command:
+
+```bash
+# Load data from the most recent generation run
+dw-sim experiment load my_experiment
+
+# Load data from a specific generation run
+dw-sim experiment load my_experiment --run-id 2
+```
+
+**What it does:**
+- Loads Parquet files from a completed generation run into warehouse tables
+- Replaces existing table contents (if any) with the loaded data
+- Defaults to loading the most recent completed generation run
+- Returns row counts per table for verification
+
+**Use cases:**
+- Reloading data after resetting an experiment (`dw-sim experiment reset`)
+- Loading a previous generation run for comparison or testing
+- Recovering data if tables were accidentally truncated
+
 #### Delete experiments
 
 ```bash
@@ -269,6 +295,22 @@ Returns all generation runs for an experiment, most recent first.
 GET /api/experiments/{name}/runs/{run_id}
 ```
 Returns detailed metadata for a specific run including status, timestamps, row counts, and errors.
+
+**Load experiment data**
+```
+POST /api/experiments/{name}/load
+Content-Type: application/json
+
+{
+  "run_id": 2
+}
+```
+Loads Parquet files from a generation run into warehouse tables. All fields are optional:
+- If `run_id` is omitted, loads the most recent completed generation run
+- Returns `{"experiment": "...", "loaded_tables": N, "row_counts": {...}}`
+- HTTP 404 if experiment not found
+- HTTP 409 if no completed runs exist
+- HTTP 500 for load errors
 
 ### Generation run tracking
 
