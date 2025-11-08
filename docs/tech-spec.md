@@ -80,6 +80,7 @@ With experiment authoring/deletion complete, the next increment introduces an op
 
 2. **Generation Engine (Python module `dw_simulator.generator`)**
    * Uses Faker for discrete column rules (varchar/email/names) and NumPy/Pandas utilities for numeric/date distributions; SDV integration is deferred until richer statistical requirements arrive.
+   * Column schemas optionally include a `distribution` block describing statistical distributions (`normal`, `exponential`, `beta`) with required parameters validated at the schema layer.
    * Each table is processed in batches (default 10k rows) to keep memory bounded. The generator yields Pandas DataFrames that are immediately written to compressed Parquet files in `/tmp/dw-sim/<experiment>/<table>/<batch>.parquet`.
    * Constraints/enforcements:
      * `is_unique`: tracked via incremental sets to guarantee no duplicates even across batches.
