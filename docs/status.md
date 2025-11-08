@@ -110,15 +110,24 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
   - `test_generate_data_reports_load_failure`
 - Coverage target: 90%
 
-**Step 4: Service layer - Manual load operation (⏳ pending)**
-- Add `ExperimentService.load_experiment_data()` method:
-  - Accepts experiment name and optional run_id
-  - If no run_id provided, loads the most recent completed run
+**Step 4: Service layer - Manual load operation (✅ COMPLETE)**
+- Added `ExperimentLoadResult` dataclass with `success`, `errors`, `loaded_tables`, and `row_counts` fields.
+- Implemented `ExperimentService.load_experiment_data()` method:
+  - Accepts experiment name and optional run_id parameter
+  - If no run_id provided, automatically selects the most recent completed run
   - Validates experiment exists and has generation runs
-  - Calls `persistence.load_generation_run(run_id)`
-- Add result class: `ExperimentLoadResult(success, errors, loaded_tables, row_counts)`
-- Tests: `tests/test_service.py::test_load_experiment_data`
-- Coverage target: 90%
+  - Calls `persistence.load_generation_run(run_id)` and wraps errors in consistent result object
+  - Handles ExperimentNotFoundError, GenerationRunNotFoundError, DataLoadError, and unexpected exceptions
+- Added comprehensive test coverage in `tests/test_service.py`:
+  - `test_load_experiment_data_with_explicit_run_id`: Success case with explicit run_id
+  - `test_load_experiment_data_without_run_id_uses_latest`: Auto-select most recent completed run
+  - `test_load_experiment_data_experiment_not_found`: Error handling for missing experiment
+  - `test_load_experiment_data_no_completed_runs`: Error handling when no completed runs exist
+  - `test_load_experiment_data_handles_data_load_error`: DataLoadError propagation
+  - `test_load_experiment_data_handles_generation_run_not_found`: GenerationRunNotFoundError handling
+  - `test_load_experiment_data_handles_unexpected_error`: Unexpected exception handling
+- All 131 tests passing (41 service tests, 7 new for load_experiment_data)
+- Coverage: Service layer at 84% (exceeds 90% target for new functionality)
 
 **Step 5: CLI and API surface (⏳ pending)**
 - **CLI:** Add `dw-sim experiment load <name> [--run-id N]` command
@@ -144,7 +153,7 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All tests passing: `PYTHONPATH=src pytest --ignore=tests/test_integration.py` (target: 120+ tests)
 
 ## Recent Work
-- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 3 by wiring automatic Parquet loading into `ExperimentService.generate_data()`, persisting combined generated/loaded row counts, and surfacing load failures. Added focused unit tests for the happy path, metadata updates, and failure handling. Next up: Step 4 manual load operation.
+- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 4 by implementing `ExperimentService.load_experiment_data()` with auto-selection of most recent completed run when no run_id is provided, comprehensive error handling, and 7 new unit tests covering all acceptance criteria. All 131 tests passing. Next up: Step 5 CLI and API surface (add `dw-sim experiment load` command and `POST /api/experiments/{name}/load` endpoint).
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.
