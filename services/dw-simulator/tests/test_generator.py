@@ -92,6 +92,118 @@ def test_generator_invalid_faker_rule() -> None:
         generator._run_faker_rule(faker, "notreal.rule")
 
 
+def test_generator_normal_distribution_for_int_column() -> None:
+    """Normal distribution uses RNG.gauss and respects numeric bounds for INT columns."""
+    generator = ExperimentGenerator()
+    column = ColumnSchema(
+        name="metric",
+        data_type="INT",
+        min_value=0,
+        max_value=200,
+        distribution={
+            "type": "normal",
+            "parameters": {"mean": 100.0, "stddev": 15.0},
+        },
+    )
+    rng = random.Random(1234)
+    faker = Faker()
+
+    values = [
+        generator._generate_value(
+            column_schema=column,
+            rng=rng,
+            faker=faker,
+            unique_values=defaultdict(set),
+            next_unique_int=defaultdict(int),
+        )
+        for _ in range(5)
+    ]
+
+    control_rng = random.Random(1234)
+    expected = []
+    for _ in range(5):
+        sample = control_rng.gauss(100.0, 15.0)
+        sample = max(0, min(200, sample))
+        expected.append(int(round(sample)))
+
+    assert values == expected
+
+
+def test_generator_exponential_distribution_for_float_column() -> None:
+    """Exponential distribution pulls from RNG.expovariate and clamps to configured bounds."""
+    generator = ExperimentGenerator()
+    column = ColumnSchema(
+        name="latency",
+        data_type="FLOAT",
+        min_value=0.0,
+        max_value=10.0,
+        distribution={
+            "type": "exponential",
+            "parameters": {"lambda": 2.0},
+        },
+    )
+    rng = random.Random(321)
+    faker = Faker()
+
+    values = [
+        generator._generate_value(
+            column_schema=column,
+            rng=rng,
+            faker=faker,
+            unique_values=defaultdict(set),
+            next_unique_int=defaultdict(int),
+        )
+        for _ in range(3)
+    ]
+
+    control_rng = random.Random(321)
+    expected = []
+    for _ in range(3):
+        sample = control_rng.expovariate(2.0)
+        sample = max(0.0, min(10.0, sample))
+        expected.append(sample)
+
+    assert values == pytest.approx(expected)
+
+
+def test_generator_beta_distribution_scales_to_range() -> None:
+    """Beta distribution scales into the configured min/max window and remains deterministic."""
+    generator = ExperimentGenerator()
+    column = ColumnSchema(
+        name="ratio",
+        data_type="FLOAT",
+        min_value=10.0,
+        max_value=20.0,
+        distribution={
+            "type": "beta",
+            "parameters": {"alpha": 2.0, "beta": 5.0},
+        },
+    )
+    faker = Faker()
+
+    rng = random.Random(999)
+    values = [
+        generator._generate_value(
+            column_schema=column,
+            rng=rng,
+            faker=faker,
+            unique_values=defaultdict(set),
+            next_unique_int=defaultdict(int),
+        )
+        for _ in range(5)
+    ]
+
+    assert all(10.0 <= value <= 20.0 for value in values)
+
+    control_rng = random.Random(999)
+    expected = []
+    for _ in range(5):
+        beta_sample = control_rng.betavariate(2.0, 5.0)
+        expected.append(10.0 + (20.0 - 10.0) * beta_sample)
+
+    assert values == pytest.approx(expected)
+
+
 def test_generator_surrogate_key_starts_at_one(tmp_path: Path) -> None:
     """Test that _row_id surrogate key columns start at 1 and increment sequentially."""
     schema = ExperimentSchema(

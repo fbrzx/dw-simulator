@@ -23,7 +23,13 @@ import pyarrow.parquet as pq
 from faker import Faker
 
 from .config import get_data_root
-from .schema import ColumnSchema, DataType, ExperimentSchema, TableSchema
+from .schema import (
+    ColumnSchema,
+    DataType,
+    DistributionType,
+    ExperimentSchema,
+    TableSchema,
+)
 
 
 class GenerationError(RuntimeError):
@@ -178,6 +184,9 @@ class ExperimentGenerator:
             next_unique_int[column_schema.name] += 1
             return next_value
 
+        if column_schema.distribution is not None:
+            return self._generate_numeric_with_distribution(column_schema, rng, as_int=True)
+
         low = int(column_schema.min_value) if column_schema.min_value is not None else 0
         high = int(column_schema.max_value) if column_schema.max_value is not None else 1_000_000
         return rng.randint(low, high)
@@ -193,6 +202,9 @@ class ExperimentGenerator:
             next_value = float(next_unique_int[column_schema.name])
             next_unique_int[column_schema.name] += 1
             return next_value
+
+        if column_schema.distribution is not None:
+            return self._generate_numeric_with_distribution(column_schema, rng, as_int=False)
 
         low = column_schema.min_value if column_schema.min_value is not None else 0.0
         high = column_schema.max_value if column_schema.max_value is not None else 1_000_000.0
@@ -238,6 +250,83 @@ class ExperimentGenerator:
         if callable(target):
             return str(target())
         return str(target)
+
+    def _generate_numeric_with_distribution(
+        self,
+        column_schema: ColumnSchema,
+        rng: random.Random,
+        *,
+        as_int: bool,
+    ) -> int | float:
+        config = column_schema.distribution
+        if config is None:
+            raise GenerationError(
+                f"Distribution configuration missing for column '{column_schema.name}'."
+            )
+
+        low, high = self._resolve_numeric_bounds(
+            column_schema, as_int=as_int, distribution_type=config.type
+        )
+
+        if config.type == DistributionType.NORMAL:
+            sample = rng.gauss(config.parameters["mean"], config.parameters["stddev"])
+        elif config.type == DistributionType.EXPONENTIAL:
+            sample = rng.expovariate(config.parameters["lambda"])
+        elif config.type == DistributionType.BETA:
+            beta_value = rng.betavariate(
+                config.parameters["alpha"], config.parameters["beta"]
+            )
+            sample = low + (high - low) * beta_value
+        else:
+            raise GenerationError(
+                f"Unsupported distribution type '{config.type}' for column '{column_schema.name}'."
+            )
+
+        sample = self._clamp_numeric_sample(sample, low=low, high=high)
+
+        if as_int:
+            int_value = int(round(sample))
+            if int_value < int(low):
+                return int(low)
+            if int_value > int(high):
+                return int(high)
+            return int_value
+
+        return sample
+
+    @staticmethod
+    def _resolve_numeric_bounds(
+        column_schema: ColumnSchema,
+        *,
+        as_int: bool,
+        distribution_type: str,
+    ) -> tuple[float, float]:
+        if distribution_type == DistributionType.BETA:
+            default_low = 0 if as_int else 0.0
+            default_high = default_low + 1
+        else:
+            default_low = 0 if as_int else 0.0
+            default_high = 1_000_000 if as_int else 1_000_000.0
+
+        low = column_schema.min_value if column_schema.min_value is not None else default_low
+        high = column_schema.max_value if column_schema.max_value is not None else default_high
+
+        if as_int:
+            low = float(int(low))
+            high = float(int(high))
+
+        if high < low:
+            high = low
+
+        return float(low), float(high)
+
+    @staticmethod
+    def _clamp_numeric_sample(sample: float, *, low: float, high: float) -> float:
+        if sample < low:
+            return low
+        if sample > high:
+            return high
+        return sample
 
 
 __all__ = [
