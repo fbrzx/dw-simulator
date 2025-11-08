@@ -10,6 +10,7 @@ services:
     environment:
       DW_SIMULATOR_TARGET_DB_URL: "sqlite:////data/sqlite/dw_simulator.db"
       DW_SIMULATOR_REDSHIFT_URL: "postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator"
+      DW_SIMULATOR_SNOWFLAKE_URL: "snowflake://test:test@local-snowflake-emulator:4566/test?account=test&warehouse=test"
       DW_SIMULATOR_STAGE_BUCKET: "s3://local/dw-simulator/staging"
       DW_SIMULATOR_DATA_ROOT: "/data"
       AWS_ENDPOINT_URL: "http://local-s3-staging:4566"
@@ -46,10 +47,14 @@ services:
       - dw-sim-net
 
   local-snowflake-emulator:
-    image: localstack/localstack:latest
+    image: localstack/snowflake:latest
     environment:
-      SERVICES: "s3"
-      LS_FEATURE_FLAGS: "snowflake"
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+      SNOWFLAKE_ACCOUNT: "test"
+      SNOWFLAKE_USER: "test"
+      SNOWFLAKE_PASSWORD: "test"
+      SNOWFLAKE_DATABASE: "test"
+      SNOWFLAKE_WAREHOUSE: "test"
     ports:
       - "4566:4566"
     networks:

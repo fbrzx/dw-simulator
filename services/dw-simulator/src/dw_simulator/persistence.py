@@ -114,7 +114,13 @@ class ExperimentPersistence:
 
     Uses dual-database architecture:
     - metadata_engine (SQLite): Stores experiment schemas, metadata, and generation runs
-    - warehouse_engine (PostgreSQL/Redshift): Stores actual data tables for querying
+    - warehouse_engine (PostgreSQL/Redshift/Snowflake): Stores actual data tables for querying
+
+    Warehouse configuration priority:
+    1. Explicit warehouse_url parameter
+    2. DW_SIMULATOR_REDSHIFT_URL environment variable
+    3. DW_SIMULATOR_SNOWFLAKE_URL environment variable (future support)
+    4. Falls back to metadata_engine (SQLite) for local/test environments
     """
 
     def __init__(
