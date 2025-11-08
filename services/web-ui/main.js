@@ -7,6 +7,7 @@ const sqlForm = document.getElementById('sql-form');
 const sqlInput = document.getElementById('sql-input');
 const sqlNameInput = document.getElementById('sql-experiment-name');
 const dialectSelect = document.getElementById('dialect-select');
+const warehouseSelect = document.getElementById('warehouse-select');
 const modeTabs = document.querySelectorAll('.mode-tab');
 const warningBanner = document.getElementById('warning-banner');
 
@@ -117,10 +118,13 @@ const renderExperiments = (experiments) => {
   experiments.forEach((experiment) => {
     const item = document.createElement('li');
     item.className = 'experiment-card';
+    const warehouseInfo = experiment.warehouse_type
+      ? ` · Warehouse: <strong>${experiment.warehouse_type}</strong>`
+      : '';
     item.innerHTML = `
       <div class="experiment-info">
         <strong>${experiment.name}</strong>
-        <small>${experiment.table_count} table(s) · Created ${new Date(experiment.created_at).toLocaleString()}</small>
+        <small>${experiment.table_count} table(s) · Created ${new Date(experiment.created_at).toLocaleString()}${warehouseInfo}</small>
         <div class="experiment-warnings-container"></div>
       </div>
       <div class="button-group">
@@ -226,14 +230,19 @@ const importExperimentFromSql = async (event) => {
   clearWarningBanner();
   setStatus('Importing SQL experiment...');
   try {
+    const payload = {
+      name,
+      sql: sqlInput.value,
+      dialect: dialectSelect.value,
+    };
+    // Only include target_warehouse if a value is selected
+    if (warehouseSelect.value) {
+      payload.target_warehouse = warehouseSelect.value;
+    }
     const response = await fetch(`${API_BASE}/experiments/import-sql`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        sql: sqlInput.value,
-        dialect: dialectSelect.value,
-      }),
+      body: JSON.stringify(payload),
     });
     const body = await response.json();
     if (!response.ok) {

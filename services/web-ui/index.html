@@ -67,6 +67,14 @@
                   <option value="snowflake">Snowflake</option>
                   <option value="ansi">ANSI</option>
                 </select>
+                <label for="warehouse-select">Target Warehouse</label>
+                <select id="warehouse-select">
+                  <option value="">Default (configured in environment)</option>
+                  <option value="sqlite">SQLite</option>
+                  <option value="redshift">Redshift (PostgreSQL emulator)</option>
+                  <option value="snowflake">Snowflake (LocalStack emulator)</option>
+                </select>
+                <small class="form-hint">Choose which warehouse to store experiment data in. Default uses system configuration priority.</small>
                 <label for="sql-input">Paste SQL (CREATE TABLE ...)</label>
                 <textarea id="sql-input" rows="12" required></textarea>
                 <div class="actions">

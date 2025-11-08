@@ -23,6 +23,7 @@ class SqlImportOptions:
     experiment_name: str
     dialect: str = "redshift"
     default_target_rows: int = DEFAULT_TARGET_ROWS
+    target_warehouse: str | None = None
 
 
 def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
@@ -94,7 +95,11 @@ def import_sql(sql: str, options: SqlImportOptions) -> ExperimentSchema:
     if not tables:
         raise SqlImportError("No CREATE TABLE statements were found in the supplied SQL.")
 
-    return ExperimentSchema(name=options.experiment_name, tables=tables)
+    return ExperimentSchema(
+        name=options.experiment_name,
+        tables=tables,
+        target_warehouse=options.target_warehouse,
+    )
 
 
 def _extract_columns_and_constraints(schema_node: exp.Schema) -> tuple[list[dict], dict[str, list[str]]]:
