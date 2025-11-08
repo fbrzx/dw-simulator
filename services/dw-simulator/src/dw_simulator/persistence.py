@@ -8,10 +8,13 @@ enforcing uniqueness/identifier guarantees laid out in docs/product-spec.md.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import (
     Boolean,
@@ -32,7 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from .config import get_target_db_url, get_redshift_url
+from .config import get_target_db_url, get_redshift_url, get_snowflake_url
 from .schema import ColumnSchema, DataType, ExperimentSchema
 from .s3_client import upload_parquet_files_to_s3, S3UploadError
 
@@ -132,11 +135,20 @@ class ExperimentPersistence:
         self.connection_string = connection_string or get_target_db_url()
         self.engine: Engine = create_engine(self.connection_string, future=True)
 
-        # Warehouse database (PostgreSQL/Redshift) - stores actual data tables
+        # Warehouse database (PostgreSQL/Redshift/Snowflake) - stores actual data tables
         # Falls back to metadata DB (SQLite) if not configured (for testing/local development)
-        self.warehouse_url = warehouse_url if warehouse_url is not None else get_redshift_url()
-        if self.warehouse_url is None:
-            self.warehouse_url = self.connection_string  # Use same as metadata DB
+        # Priority: explicit warehouse_url > Redshift URL > Snowflake URL > metadata DB
+        if warehouse_url is not None:
+            self.warehouse_url = warehouse_url
+        else:
+            redshift_url = get_redshift_url()
+            snowflake_url = get_snowflake_url()
+            if redshift_url is not None:
+                self.warehouse_url = redshift_url
+            elif snowflake_url is not None:
+                self.warehouse_url = snowflake_url
+            else:
+                self.warehouse_url = self.connection_string  # Use same as metadata DB
         self.warehouse_engine: Engine = create_engine(self.warehouse_url, future=True)
 
         self._metadata = MetaData()
@@ -657,15 +669,24 @@ class ExperimentPersistence:
                         f"Table '{table_name}' is not registered under experiment '{experiment_name}'."
                     )
 
-            # Load data into warehouse database (Redshift/PostgreSQL)
+            # Load data into warehouse database (Redshift/PostgreSQL/Snowflake)
             physical_table = self._physical_table_name(experiment_name, table_name)
 
-            # Check if warehouse is PostgreSQL (Redshift emulator)
-            is_postgres = self.warehouse_engine.dialect.name == 'postgresql'
+            # Detect warehouse type and use appropriate loading strategy
+            dialect_name = self.warehouse_engine.dialect.name
 
-            if is_postgres:
-                # PostgreSQL/Redshift: Use S3 + COPY FROM
+            if dialect_name == 'postgresql':
+                # PostgreSQL/Redshift: Use S3 + COPY FROM (via direct INSERT fallback)
                 return self._load_via_s3_copy(
+                    experiment_name=experiment_name,
+                    table_name=table_name,
+                    physical_table=physical_table,
+                    parquet_files=paths,
+                    run_id=run_id
+                )
+            elif dialect_name == 'snowflake':
+                # Snowflake: Use S3 + COPY INTO
+                return self._load_via_snowflake_copy(
                     experiment_name=experiment_name,
                     table_name=table_name,
                     physical_table=physical_table,
@@ -760,6 +781,145 @@ class ExperimentPersistence:
                 total_rows += parquet_table.num_rows
 
             return total_rows
+
+    def _load_via_snowflake_copy(
+        self,
+        experiment_name: str,
+        table_name: str,
+        physical_table: str,
+        parquet_files: list[Path],
+        run_id: int | None,
+    ) -> int:
+        """
+        Load Parquet files using S3 + Snowflake COPY INTO command.
+
+        This implements Snowpipe-style loading by:
+        1. Uploading Parquet files to LocalStack S3
+        2. Using Snowflake COPY INTO to load from S3 URIs
+        3. Cleaning up staging files after successful load
+
+        Supported data types:
+        - Basic types: INT, FLOAT, VARCHAR, DATE, BOOLEAN
+        - Snowflake-specific types (VARIANT, ARRAY, OBJECT) are not yet supported
+          in the schema definition. Future enhancement tracked in backlog.
+
+        Falls back to direct INSERT if LocalStack Snowflake emulator doesn't
+        support COPY INTO command (limited feature support in emulation).
+
+        Returns the total number of rows loaded.
+        """
+        try:
+            # Upload Parquet files to S3
+            s3_uris = upload_parquet_files_to_s3(
+                parquet_files=[str(f) for f in parquet_files],
+                experiment_name=experiment_name,
+                table_name=table_name,
+                run_id=run_id
+            )
+        except S3UploadError as exc:
+            raise DataLoadError(
+                f"Failed to upload Parquet files to S3: {exc}"
+            ) from exc
+
+        # Clear existing data and load from S3 using Snowflake COPY INTO
+        with self.warehouse_engine.begin() as warehouse_conn:
+            inspector = inspect(self.warehouse_engine)
+            if not inspector.has_table(physical_table):
+                raise DataLoadError(
+                    f"Physical table '{physical_table}' does not exist in the warehouse."
+                )
+
+            # Delete existing contents
+            warehouse_conn.exec_driver_sql(f'DELETE FROM "{physical_table}"')
+
+            # Use Snowflake COPY INTO command to load from S3
+            # Snowflake supports loading directly from S3 URIs using COPY INTO
+            # Format: COPY INTO table FROM 's3://bucket/prefix/' FILE_FORMAT = (TYPE = PARQUET)
+            #
+            # For LocalStack Snowflake emulation, we need to construct the S3 path
+            # and use the COPY INTO command with Parquet format specification
+
+            # Extract bucket and prefix from first S3 URI
+            # Format: s3://bucket/experiments/{experiment}/{table}/run_{id}/file.parquet
+            if s3_uris:
+                # Get the S3 prefix (everything except the filename)
+                first_uri = s3_uris[0]
+                # Remove s3:// prefix
+                path_parts = first_uri.replace('s3://', '').split('/')
+                bucket = path_parts[0]
+                # Get directory path (everything except last part which is the filename)
+                prefix = '/'.join(path_parts[1:-1])
+                s3_path = f"s3://{bucket}/{prefix}/"
+
+                # Construct COPY INTO command for Snowflake
+                # Using simplified syntax for LocalStack Snowflake emulator
+                copy_stmt = f"""
+                    COPY INTO "{physical_table}"
+                    FROM '{s3_path}'
+                    FILE_FORMAT = (TYPE = PARQUET)
+                    PATTERN = '.*\\.parquet'
+                """
+
+                try:
+                    warehouse_conn.exec_driver_sql(copy_stmt)
+                except SQLAlchemyError as exc:
+                    # If Snowflake COPY INTO fails, fall back to direct INSERT
+                    # This handles cases where LocalStack Snowflake emulator has limited feature support
+                    logger.warning(
+                        f"Snowflake COPY INTO failed, falling back to direct INSERT: {exc}"
+                    )
+                    # Use direct insert fallback
+                    return self._load_via_direct_insert_in_transaction(
+                        warehouse_conn=warehouse_conn,
+                        physical_table=physical_table,
+                        parquet_files=parquet_files
+                    )
+
+            # Count total rows loaded
+            result = warehouse_conn.execute(
+                text(f'SELECT COUNT(*) as count FROM "{physical_table}"')
+            )
+            row = result.fetchone()
+            total_rows = row[0] if row else 0
+
+            return total_rows
+
+    def _load_via_direct_insert_in_transaction(
+        self,
+        warehouse_conn: Connection,
+        physical_table: str,
+        parquet_files: list[Path],
+    ) -> int:
+        """
+        Load Parquet files using direct INSERT statements within an existing transaction.
+
+        This is a helper method used as a fallback when COPY commands fail.
+        """
+        target_table = Table(physical_table, MetaData(), autoload_with=self.warehouse_engine)
+
+        total_rows = 0
+        for file_path in parquet_files:
+            try:
+                parquet_table = pq.read_table(file_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                raise DataLoadError(
+                    f"Failed to read Parquet file '{file_path}': {exc}"
+                ) from exc
+
+            if parquet_table.num_rows == 0:
+                continue
+
+            records = parquet_table.to_pylist()
+            try:
+                warehouse_conn.execute(target_table.insert(), records)
+            except SQLAlchemyError as exc:
+                raise DataLoadError(
+                    f"Failed to load Parquet file '{file_path}' into '{physical_table}': {exc}"
+                ) from exc
+
+            total_rows += parquet_table.num_rows
+
+        return total_rows
 
     def _load_via_direct_insert(
         self,

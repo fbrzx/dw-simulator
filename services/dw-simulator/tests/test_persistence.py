@@ -833,3 +833,140 @@ def test_load_generation_run_multi_table(tmp_path: Path) -> None:
 
     assert len(order_rows) == 3
     assert order_rows == [(100, 1), (101, 1), (102, 2)]
+
+
+# ============================================================================
+# Snowflake Loading Tests (US 5.2 Phase 2 Step 5)
+# ============================================================================
+
+
+def test_warehouse_url_priority_snowflake(tmp_path: Path, monkeypatch) -> None:
+    """Test that Snowflake URL is used when Redshift URL is not set."""
+    from unittest.mock import patch, MagicMock
+
+    db_path = tmp_path / "metadata.db"
+    snowflake_url = "snowflake://test:test@localhost:4566/test"
+
+    # Set Snowflake URL but not Redshift URL
+    monkeypatch.setenv("DW_SIMULATOR_SNOWFLAKE_URL", snowflake_url)
+    monkeypatch.delenv("DW_SIMULATOR_REDSHIFT_URL", raising=False)
+
+    # Mock the create_engine to avoid actually creating a Snowflake connection
+    with patch('dw_simulator.persistence.create_engine') as mock_create_engine:
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        persistence = ExperimentPersistence(connection_string=f"sqlite:///{db_path}")
+
+        # Warehouse URL should be Snowflake URL
+        assert persistence.warehouse_url == snowflake_url
+        # Verify create_engine was called with Snowflake URL
+        assert any(call[0][0] == snowflake_url for call in mock_create_engine.call_args_list)
+
+
+def test_warehouse_url_priority_redshift_over_snowflake(tmp_path: Path, monkeypatch) -> None:
+    """Test that Redshift URL takes priority over Snowflake URL."""
+    db_path = tmp_path / "metadata.db"
+    redshift_url = "postgresql://user:pass@localhost:5432/redshift"
+    snowflake_url = "snowflake://test:test@localhost:4566/test"
+
+    # Set both URLs
+    monkeypatch.setenv("DW_SIMULATOR_REDSHIFT_URL", redshift_url)
+    monkeypatch.setenv("DW_SIMULATOR_SNOWFLAKE_URL", snowflake_url)
+
+    persistence = ExperimentPersistence(connection_string=f"sqlite:///{db_path}")
+
+    # Warehouse URL should be Redshift URL (higher priority)
+    assert persistence.warehouse_url == redshift_url
+
+
+def test_warehouse_url_explicit_override(tmp_path: Path, monkeypatch) -> None:
+    """Test that explicit warehouse_url parameter takes highest priority."""
+    db_path = tmp_path / "metadata.db"
+    explicit_url = f"sqlite:///{tmp_path / 'explicit.db'}"
+    redshift_url = "postgresql://user:pass@localhost:5432/redshift"
+    snowflake_url = "snowflake://test:test@localhost:4566/test"
+
+    # Set both environment URLs
+    monkeypatch.setenv("DW_SIMULATOR_REDSHIFT_URL", redshift_url)
+    monkeypatch.setenv("DW_SIMULATOR_SNOWFLAKE_URL", snowflake_url)
+
+    persistence = ExperimentPersistence(
+        connection_string=f"sqlite:///{db_path}",
+        warehouse_url=explicit_url
+    )
+
+    # Warehouse URL should be explicit parameter (highest priority)
+    assert persistence.warehouse_url == explicit_url
+
+
+def test_warehouse_dialect_detection_sqlite(tmp_path: Path) -> None:
+    """Test that SQLite dialect is correctly detected."""
+    persistence = create_persistence(tmp_path)
+
+    # Warehouse engine should be SQLite (default fallback)
+    assert persistence.warehouse_engine.dialect.name == 'sqlite'
+
+
+def test_load_via_direct_insert_in_transaction(tmp_path: Path) -> None:
+    """Test the fallback direct insert helper method."""
+    from datetime import date
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = build_schema()
+    persistence.create_experiment(schema)
+
+    physical_table = f"{normalize_identifier(schema.name)}__{normalize_identifier(schema.tables[0].name)}"
+
+    # Create test Parquet file
+    parquet_path = tmp_path / "test.parquet"
+    pq.write_table(
+        pa.table({
+            "customer_id": pa.array([1, 2, 3], type=pa.int64()),
+            "email": pa.array(["a@test.com", "b@test.com", "c@test.com"]),
+            "signup_date": pa.array([date(2024, 1, 1), date(2024, 2, 1), date(2024, 3, 1)], type=pa.date32()),
+        }),
+        parquet_path,
+        compression="snappy",
+    )
+
+    # Test loading via the helper method
+    with persistence.warehouse_engine.begin() as conn:
+        rows_loaded = persistence._load_via_direct_insert_in_transaction(
+            warehouse_conn=conn,
+            physical_table=physical_table,
+            parquet_files=[parquet_path]
+        )
+
+    assert rows_loaded == 3
+
+    # Verify data was loaded
+    with persistence.warehouse_engine.connect() as conn:
+        rows = conn.execute(
+            text(f'SELECT customer_id FROM "{physical_table}" ORDER BY customer_id')
+        ).fetchall()
+
+    assert len(rows) == 3
+    assert rows == [(1,), (2,), (3,)]
+
+
+def test_snowflake_copy_docstring_documents_limitations() -> None:
+    """Verify that Snowflake COPY INTO method documents data type limitations."""
+    import inspect
+
+    # Get the docstring of the _load_via_snowflake_copy method
+    docstring = ExperimentPersistence._load_via_snowflake_copy.__doc__
+
+    # Verify it documents supported data types
+    assert "INT, FLOAT, VARCHAR, DATE, BOOLEAN" in docstring
+
+    # Verify it documents Snowflake-specific type limitations
+    assert "VARIANT, ARRAY, OBJECT" in docstring
+    assert "not yet supported" in docstring
+
+    # Verify it documents fallback behavior
+    assert "Falls back to direct INSERT" in docstring
+    assert "LocalStack Snowflake emulator" in docstring
