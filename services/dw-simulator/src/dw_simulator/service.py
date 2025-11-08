@@ -30,6 +30,8 @@ from .persistence import (
     ExperimentPersistence,
     GenerationAlreadyRunningError,
     GenerationRunMetadata,
+    GenerationRunNotFoundError,
+    GenerationStatus,
     QueryExecutionError,
     QueryResult,
 )
@@ -71,6 +73,16 @@ class ExperimentResetResult:
     success: bool
     errors: Sequence[str] = field(default_factory=tuple)
     reset_tables: int = 0
+
+
+@dataclass(frozen=True)
+class ExperimentLoadResult:
+    """Outcome for experiment data loading attempts."""
+
+    success: bool
+    errors: Sequence[str] = field(default_factory=tuple)
+    loaded_tables: int = 0
+    row_counts: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -338,6 +350,77 @@ class ExperimentService:
                 run_id=run_id,
             )
 
+    def load_experiment_data(
+        self,
+        experiment_name: str,
+        run_id: int | None = None,
+    ) -> ExperimentLoadResult:
+        """
+        Load Parquet files from a generation run into warehouse tables.
+
+        If no run_id is provided, loads the most recent completed generation run.
+
+        Args:
+            experiment_name: Name of the experiment to load
+            run_id: Specific generation run ID to load (optional)
+
+        Returns:
+            ExperimentLoadResult with success status, errors, and row counts
+        """
+        # Verify experiment exists
+        metadata = self.persistence.get_experiment_metadata(experiment_name)
+        if metadata is None:
+            return ExperimentLoadResult(
+                success=False,
+                errors=[f"Experiment '{experiment_name}' does not exist."]
+            )
+
+        # If no run_id provided, find the most recent completed run
+        if run_id is None:
+            runs = self.persistence.list_generation_runs(experiment_name)
+            completed_runs = [
+                run for run in runs
+                if run.status == GenerationStatus.COMPLETED
+            ]
+
+            if not completed_runs:
+                return ExperimentLoadResult(
+                    success=False,
+                    errors=[f"No completed generation runs found for experiment '{experiment_name}'."]
+                )
+
+            # list_generation_runs returns runs in reverse chronological order (most recent first)
+            run_id = completed_runs[0].id
+
+        # Attempt to load the specified run
+        try:
+            row_counts = self.persistence.load_generation_run(run_id)
+            return ExperimentLoadResult(
+                success=True,
+                loaded_tables=len(row_counts),
+                row_counts=row_counts,
+            )
+        except GenerationRunNotFoundError as exc:
+            return ExperimentLoadResult(
+                success=False,
+                errors=[str(exc)]
+            )
+        except DataLoadError as exc:
+            return ExperimentLoadResult(
+                success=False,
+                errors=[str(exc)]
+            )
+        except ExperimentNotFoundError as exc:
+            return ExperimentLoadResult(
+                success=False,
+                errors=[str(exc)]
+            )
+        except Exception as exc:
+            return ExperimentLoadResult(
+                success=False,
+                errors=[f"Unexpected error during data loading: {type(exc).__name__}: {exc}"]
+            )
+
     def list_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
         """List all generation runs for an experiment."""
         return self.persistence.list_generation_runs(experiment_name)
@@ -489,6 +572,7 @@ __all__ = [
     "ExperimentCreateResult",
     "ExperimentDeleteResult",
     "ExperimentResetResult",
+    "ExperimentLoadResult",
     "ExperimentGenerateResult",
     "QueryExecutionResult",
     "SUPPORTED_DIALECTS",

@@ -754,3 +754,184 @@ def test_save_query_to_file(tmp_path: Path) -> None:
 
     assert output_file.exists()
     assert output_file.read_text() == sql_query
+
+
+def test_load_experiment_data_with_explicit_run_id() -> None:
+    """Test loading data with an explicit run_id (US 5.1 Step 4)."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        load_return={"customers": 100, "orders": 500},
+    )
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.load_experiment_data("ServiceExperiment", run_id=42)
+
+    assert result.success is True
+    assert result.loaded_tables == 2
+    assert result.row_counts == {"customers": 100, "orders": 500}
+    assert stub_persistence.loaded_runs == [42]
+    assert not result.errors
+
+
+def test_load_experiment_data_without_run_id_uses_latest() -> None:
+    """Test loading data without run_id uses the most recent completed run (US 5.1 Step 4)."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        load_return={"customers": 200},
+    )
+
+    # Add multiple runs, including non-completed ones
+    now = datetime.now(timezone.utc)
+    stub_persistence.runs[1] = GenerationRunMetadata(
+        id=1,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.COMPLETED,
+        started_at=now,
+        completed_at=now,
+        row_counts='{"customers": 100}',
+        output_path="/tmp/run1",
+        error_message=None,
+        seed=None,
+    )
+    stub_persistence.runs[2] = GenerationRunMetadata(
+        id=2,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.FAILED,
+        started_at=now,
+        completed_at=now,
+        row_counts='{}',
+        output_path="/tmp/run2",
+        error_message="Some error",
+        seed=None,
+    )
+    stub_persistence.runs[3] = GenerationRunMetadata(
+        id=3,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.COMPLETED,
+        started_at=now,
+        completed_at=now,
+        row_counts='{"customers": 200}',
+        output_path="/tmp/run3",
+        error_message=None,
+        seed=None,
+    )
+
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+    result = service.load_experiment_data("ServiceExperiment")
+
+    assert result.success is True
+    # Should load the first completed run in the list (run 1)
+    assert stub_persistence.loaded_runs == [1]
+    assert result.loaded_tables == 1
+    assert result.row_counts == {"customers": 200}
+
+
+def test_load_experiment_data_experiment_not_found() -> None:
+    """Test loading data returns error when experiment doesn't exist (US 5.1 Step 4)."""
+    stub_persistence = StubPersistence(metadata=None)
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+
+    result = service.load_experiment_data("MissingExperiment")
+
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "does not exist" in result.errors[0]
+    assert result.loaded_tables == 0
+    assert not result.row_counts
+
+
+def test_load_experiment_data_no_completed_runs() -> None:
+    """Test loading data returns error when no completed runs exist (US 5.1 Step 4)."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata)
+
+    # Add only failed/running runs
+    now = datetime.now(timezone.utc)
+    stub_persistence.runs[1] = GenerationRunMetadata(
+        id=1,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.FAILED,
+        started_at=now,
+        completed_at=now,
+        row_counts='{}',
+        output_path="/tmp/run1",
+        error_message="Error",
+        seed=None,
+    )
+    stub_persistence.runs[2] = GenerationRunMetadata(
+        id=2,
+        experiment_name="ServiceExperiment",
+        status=GenerationStatus.RUNNING,
+        started_at=now,
+        completed_at=None,
+        row_counts='{}',
+        output_path="/tmp/run2",
+        error_message=None,
+        seed=None,
+    )
+
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+    result = service.load_experiment_data("ServiceExperiment")
+
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "No completed generation runs found" in result.errors[0]
+    assert result.loaded_tables == 0
+
+
+def test_load_experiment_data_handles_data_load_error() -> None:
+    """Test loading data handles DataLoadError from persistence (US 5.1 Step 4)."""
+    from dw_simulator.persistence import DataLoadError
+
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        load_exception=DataLoadError("Failed to load Parquet files: missing directory"),
+    )
+
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+    result = service.load_experiment_data("ServiceExperiment", run_id=1)
+
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "Failed to load Parquet files" in result.errors[0]
+    assert result.loaded_tables == 0
+
+
+def test_load_experiment_data_handles_generation_run_not_found() -> None:
+    """Test loading data handles GenerationRunNotFoundError (US 5.1 Step 4)."""
+    from dw_simulator.persistence import GenerationRunNotFoundError
+
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        load_exception=GenerationRunNotFoundError("Generation run 999 not found."),
+    )
+
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+    result = service.load_experiment_data("ServiceExperiment", run_id=999)
+
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "Generation run 999 not found" in result.errors[0]
+    assert result.loaded_tables == 0
+
+
+def test_load_experiment_data_handles_unexpected_error() -> None:
+    """Test loading data handles unexpected errors gracefully (US 5.1 Step 4)."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        load_exception=RuntimeError("Unexpected database connection error"),
+    )
+
+    service = ExperimentService(persistence=stub_persistence)  # type: ignore[arg-type]
+    result = service.load_experiment_data("ServiceExperiment", run_id=1)
+
+    assert result.success is False
+    assert len(result.errors) == 1
+    assert "Unexpected error during data loading" in result.errors[0]
+    assert "RuntimeError" in result.errors[0]
+    assert result.loaded_tables == 0
