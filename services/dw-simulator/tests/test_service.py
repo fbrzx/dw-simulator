@@ -155,7 +155,7 @@ class StubPersistence:
     def list_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
         return [run for run in self.runs.values() if run.experiment_name == experiment_name]
 
-    def execute_query(self, sql: str) -> QueryResult:
+    def execute_query(self, sql: str, experiment_name: str | None = None) -> QueryResult:
         self.executed_queries.append(sql)
         if self.query_exception:
             raise self.query_exception
