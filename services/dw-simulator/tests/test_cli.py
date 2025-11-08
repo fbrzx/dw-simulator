@@ -150,7 +150,7 @@ def test_summarize_distribution_columns_helper_handles_invalid_json() -> None:
 
     assert lines == [
         " - metrics.score: normal (mean=25, stddev=5)",
-        " - metrics.latency: exponential (lambda=2.0)",
+        " - metrics.latency: exponential (lambda=2)",
     ]
 
 
