@@ -6,7 +6,12 @@ import pyarrow.parquet as pq
 import pytest
 from faker import Faker
 
-from dw_simulator.generator import ExperimentGenerator, GenerationRequest, GenerationError
+from dw_simulator.generator import (
+    ExperimentGenerator,
+    GenerationRequest,
+    GenerationError,
+    TableGenerationResult,
+)
 from dw_simulator.schema import ColumnSchema, ExperimentSchema, TableSchema
 
 
