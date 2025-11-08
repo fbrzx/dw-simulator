@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from . import __version__
 from .service import (
@@ -21,6 +21,7 @@ from .service import (
     QueryExecutionResult,
     SUPPORTED_DIALECTS,
 )
+from .schema import ExperimentSchema
 
 
 ALLOWED_ORIGINS = [
@@ -83,6 +84,12 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
         for experiment in experiments:
             table_count = _service().persistence.get_table_count(experiment.name)
             warnings = _service().get_experiment_warnings(experiment.name)
+            distributions: list[dict[str, Any]] = []
+            try:
+                schema = ExperimentSchema.model_validate_json(experiment.schema_json)
+                distributions = ExperimentService.summarize_distribution_configs(schema)
+            except (ValidationError, ValueError):
+                distributions = []
             # Include schema for UI to show table details
             summaries.append(
                 {
@@ -93,6 +100,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
                     "schema": experiment.schema_json,
                     "warnings": warnings,
                     "warehouse_type": experiment.warehouse_type,
+                    "distributions": distributions,
                 }
             )
         return {"experiments": summaries}

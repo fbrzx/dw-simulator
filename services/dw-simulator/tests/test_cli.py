@@ -73,6 +73,46 @@ def test_experiment_create_command_success(tmp_path: Path, monkeypatch: pytest.M
     assert "Experiment 'ExperimentCLI' created" in result.stdout
 
 
+def test_experiment_create_command_reports_distributions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI surfaces distribution-configured columns after creation."""
+
+    schema = {
+        "name": "DistributionCLI",
+        "tables": [
+            {
+                "name": "metrics",
+                "target_rows": 10,
+                "columns": [
+                    {"name": "metric_id", "data_type": "INT", "is_unique": True},
+                    {
+                        "name": "score",
+                        "data_type": "FLOAT",
+                        "distribution": {
+                            "type": "normal",
+                            "parameters": {"mean": 50, "stddev": 5},
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(json.dumps(schema))
+    monkeypatch.setenv("DW_SIMULATOR_TARGET_DB_URL", f"sqlite:///{tmp_path/'warehouse.db'}")
+
+    result = runner.invoke(app, ["experiment", "create", str(schema_path)])
+
+    assert result.exit_code == 0
+    assert "Experiment 'DistributionCLI' created" in result.stdout
+    assert "Distribution-configured columns" in result.stdout
+    assert "metrics.score" in result.stdout
+    assert "normal" in result.stdout
+    assert "mean=50" in result.stdout
+    assert "stddev=5" in result.stdout
+
+
 def test_experiment_create_command_handles_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     schema_path = tmp_path / "schema.json"
     schema_path.write_text("{invalid json")

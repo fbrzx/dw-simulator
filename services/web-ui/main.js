@@ -210,6 +210,33 @@ const renderExperiments = (experiments) => {
       }
     }
 
+    if (Array.isArray(experiment.distributions) && experiment.distributions.length > 0) {
+      const info = item.querySelector('.experiment-info');
+      if (info) {
+        const summary = document.createElement('div');
+        summary.className = 'distribution-summary';
+
+        const heading = document.createElement('strong');
+        heading.textContent = experiment.distributions.length === 1
+          ? 'Distribution-configured column'
+          : 'Distribution-configured columns';
+        summary.appendChild(heading);
+
+        const list = document.createElement('ul');
+        experiment.distributions.forEach((distribution) => {
+          const itemEl = document.createElement('li');
+          const params = Object.entries(distribution.parameters || {})
+            .map(([key, value]) => `${key}=${value}`)
+            .join(', ');
+          itemEl.textContent = `${distribution.table}.${distribution.column}: ${distribution.type}${params ? ` (${params})` : ''}`;
+          list.appendChild(itemEl);
+        });
+
+        summary.appendChild(list);
+        info.appendChild(summary);
+      }
+    }
+
     experimentListEl.appendChild(item);
   });
 };
@@ -377,6 +404,24 @@ const openGenerateModal = async (name) => {
       <div class="table-override">
         <label for="rows-${table.name}">Table: ${table.name}</label>
         <small>Default target: ${table.target_rows} rows</small>
+        ${(() => {
+          const distributionColumns = (table.columns || []).filter(col => col.distribution);
+          if (!distributionColumns.length) {
+            return '';
+          }
+          const list = distributionColumns.map((col) => {
+            const params = Object.entries(col.distribution.parameters || {})
+              .map(([key, value]) => `${key}=${value}`)
+              .join(', ');
+            return `<li>${col.name}: ${col.distribution.type}${params ? ` (${params})` : ''}</li>`;
+          }).join('');
+          return `
+            <details class="distribution-details">
+              <summary>Distribution-configured column${distributionColumns.length > 1 ? 's' : ''}</summary>
+              <ul>${list}</ul>
+            </details>
+          `;
+        })()}
         <input
           type="number"
           id="rows-${table.name}"
