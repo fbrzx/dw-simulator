@@ -47,6 +47,7 @@ DEFAULT_TARGET_DB_URL = f"sqlite:///{(DATA_ROOT / 'sqlite' / 'dw_simulator.db').
 DEFAULT_STAGE_BUCKET = "s3://local/dw-simulator/staging"
 # Default to same as metadata DB (for testing), can be overridden via environment variable
 DEFAULT_REDSHIFT_URL = None  # Will fall back to TARGET_DB_URL if not set
+DEFAULT_SNOWFLAKE_URL = None  # Will fall back to TARGET_DB_URL if not set
 DEFAULT_AWS_ENDPOINT_URL = "http://local-s3-staging:4566"
 
 
@@ -81,6 +82,19 @@ def get_redshift_url() -> str | None:
     return os.environ.get("DW_SIMULATOR_REDSHIFT_URL", DEFAULT_REDSHIFT_URL)
 
 
+def get_snowflake_url() -> str | None:
+    """
+    Resolve the Snowflake emulator connection string (LocalStack).
+
+    Returns None if not configured (will fall back to SQLite for local/test environments).
+    In Docker, this should be set to snowflake://test:test@local-snowflake-emulator:4566/test?account=test&warehouse=test
+
+    Note: Snowflake connections require snowflake-connector-python and snowflake-sqlalchemy packages.
+    """
+
+    return os.environ.get("DW_SIMULATOR_SNOWFLAKE_URL", DEFAULT_SNOWFLAKE_URL)
+
+
 def get_aws_endpoint_url() -> str | None:
     """Resolve the AWS endpoint URL for LocalStack S3 integration."""
 
@@ -105,10 +119,12 @@ __all__ = [
     "DEFAULT_TARGET_DB_URL",
     "DEFAULT_STAGE_BUCKET",
     "DEFAULT_REDSHIFT_URL",
+    "DEFAULT_SNOWFLAKE_URL",
     "DEFAULT_AWS_ENDPOINT_URL",
     "get_data_root",
     "get_target_db_url",
     "get_stage_bucket",
     "get_redshift_url",
+    "get_snowflake_url",
     "get_aws_endpoint_url",
 ]
