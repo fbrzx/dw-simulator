@@ -45,6 +45,9 @@ def _resolve_data_root() -> Path:
 DATA_ROOT = _resolve_data_root()
 DEFAULT_TARGET_DB_URL = f"sqlite:///{(DATA_ROOT / 'sqlite' / 'dw_simulator.db').resolve()}"
 DEFAULT_STAGE_BUCKET = "s3://local/dw-simulator/staging"
+# Default to same as metadata DB (for testing), can be overridden via environment variable
+DEFAULT_REDSHIFT_URL = None  # Will fall back to TARGET_DB_URL if not set
+DEFAULT_AWS_ENDPOINT_URL = "http://local-s3-staging:4566"
 
 
 def get_data_root() -> Path:
@@ -67,6 +70,23 @@ def get_stage_bucket() -> str:
     return os.environ.get("DW_SIMULATOR_STAGE_BUCKET", DEFAULT_STAGE_BUCKET)
 
 
+def get_redshift_url() -> str | None:
+    """
+    Resolve the Redshift emulator connection string (PostgreSQL).
+
+    Returns None if not configured (will fall back to SQLite for local/test environments).
+    In Docker, this should be set to postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator
+    """
+
+    return os.environ.get("DW_SIMULATOR_REDSHIFT_URL", DEFAULT_REDSHIFT_URL)
+
+
+def get_aws_endpoint_url() -> str | None:
+    """Resolve the AWS endpoint URL for LocalStack S3 integration."""
+
+    return os.environ.get("AWS_ENDPOINT_URL", DEFAULT_AWS_ENDPOINT_URL)
+
+
 def _ensure_sqlite_parent(url: str) -> None:
     prefix = "sqlite:///"
     if not url.startswith(prefix):
@@ -84,7 +104,11 @@ __all__ = [
     "DATA_ROOT",
     "DEFAULT_TARGET_DB_URL",
     "DEFAULT_STAGE_BUCKET",
+    "DEFAULT_REDSHIFT_URL",
+    "DEFAULT_AWS_ENDPOINT_URL",
     "get_data_root",
     "get_target_db_url",
     "get_stage_bucket",
+    "get_redshift_url",
+    "get_aws_endpoint_url",
 ]
