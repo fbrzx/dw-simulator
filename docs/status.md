@@ -129,17 +129,20 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All 131 tests passing (41 service tests, 7 new for load_experiment_data)
 - Coverage: Service layer at 84% (exceeds 90% target for new functionality)
 
-**Step 5: CLI and API surface (⏳ pending)**
-- **CLI:** Add `dw-sim experiment load <name> [--run-id N]` command
+**Step 5: CLI and API surface (✅ COMPLETE)**
+- **CLI:** Added `dw-sim experiment load <name> [--run-id N]` command
   - Default: loads most recent generation run
   - `--run-id`: loads specific run
   - Displays success/error feedback and row counts per table
-- **API:** Add `POST /api/experiments/{name}/load` endpoint
+- **API:** Added `POST /api/experiments/{name}/load` endpoint
   - Request body: `{"run_id": int | null}`
   - Response: `{"experiment": str, "loaded_tables": int, "row_counts": {...}}`
   - HTTP status codes: 200 (success), 404 (not found), 409 (no runs), 500 (load error)
-- Tests: `tests/test_cli.py::test_load_command`, `tests/test_api.py::test_load_endpoint`
-- Coverage target: 90%
+- Added comprehensive test coverage:
+  - CLI: 4 tests (`test_experiment_load_command_with_explicit_run_id`, `test_experiment_load_command_without_run_id`, `test_experiment_load_command_experiment_not_found`, `test_experiment_load_command_no_completed_runs`)
+  - API: 4 tests (`test_load_experiment_with_explicit_run_id`, `test_load_experiment_without_run_id`, `test_load_experiment_not_found`, `test_load_experiment_no_completed_runs`)
+- All 139 tests passing (8 new tests added)
+- Coverage target: 90% achieved
 
 **Step 6: Integration tests and documentation (⏳ pending)**
 - **Integration test:** End-to-end workflow test
@@ -153,7 +156,7 @@ Currently, `dw-sim experiment generate` produces Parquet files on the local file
 - All tests passing: `PYTHONPATH=src pytest --ignore=tests/test_integration.py` (target: 120+ tests)
 
 ## Recent Work
-- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 4 by implementing `ExperimentService.load_experiment_data()` with auto-selection of most recent completed run when no run_id is provided, comprehensive error handling, and 7 new unit tests covering all acceptance criteria. All 131 tests passing. Next up: Step 5 CLI and API surface (add `dw-sim experiment load` command and `POST /api/experiments/{name}/load` endpoint).
+- **Parquet data loading (US 5.1 - IN PROGRESS):** Completed Step 5 by implementing CLI command `dw-sim experiment load` and API endpoint `POST /api/experiments/{name}/load` with comprehensive test coverage (8 new tests: 4 CLI + 4 API). All 139 tests passing. Next up: Step 6 Integration tests and documentation.
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.
 - **Reset experiments (US 2.2):** Complete implementation of experiment reset functionality with guards against concurrent generation runs, comprehensive testing, and full CLI/API/UI support.

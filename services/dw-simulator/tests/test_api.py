@@ -204,3 +204,67 @@ def test_reset_experiment_during_generation(client: TestClient) -> None:
         body = response.json()
         assert "detail" in body
         assert any("generation is running" in str(err).lower() for err in body["detail"])
+
+
+def test_load_experiment_with_explicit_run_id(client: TestClient, tmp_path: Path) -> None:
+    """Test loading experiment data with explicit run_id via API."""
+    # Create experiment
+    client.post("/api/experiments", json=sample_schema("LoadApi"))
+
+    # Generate data
+    output_dir = tmp_path / "generated"
+    client.post(
+        "/api/experiments/LoadApi/generate",
+        json={"output_dir": str(output_dir)},
+    )
+
+    # Load data with explicit run_id=1
+    response = client.post("/api/experiments/LoadApi/load", json={"run_id": 1})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["experiment"] == "LoadApi"
+    assert body["loaded_tables"] == 1
+    assert "customers" in body["row_counts"]
+    assert body["row_counts"]["customers"] == 1
+
+
+def test_load_experiment_without_run_id(client: TestClient, tmp_path: Path) -> None:
+    """Test loading experiment data using most recent run (no run_id)."""
+    # Create experiment
+    client.post("/api/experiments", json=sample_schema("LoadLatestApi"))
+
+    # Generate data
+    output_dir = tmp_path / "generated"
+    client.post(
+        "/api/experiments/LoadLatestApi/generate",
+        json={"output_dir": str(output_dir)},
+    )
+
+    # Load without specifying run_id (should use most recent)
+    response = client.post("/api/experiments/LoadLatestApi/load", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["experiment"] == "LoadLatestApi"
+    assert body["loaded_tables"] == 1
+
+
+def test_load_experiment_not_found(client: TestClient) -> None:
+    """Test load returns 404 when experiment doesn't exist."""
+    response = client.post("/api/experiments/NonExistent/load", json={})
+    assert response.status_code == 404
+    body = response.json()
+    assert "detail" in body
+    assert any("does not exist" in str(err).lower() for err in body["detail"])
+
+
+def test_load_experiment_no_completed_runs(client: TestClient) -> None:
+    """Test load returns 409 when no completed generation runs exist."""
+    # Create experiment but don't generate data
+    client.post("/api/experiments", json=sample_schema("NoRunsApi"))
+
+    # Try to load (should fail - no runs)
+    response = client.post("/api/experiments/NoRunsApi/load", json={})
+    assert response.status_code == 409
+    body = response.json()
+    assert "detail" in body
+    assert any("no completed generation runs" in str(err).lower() for err in body["detail"])
