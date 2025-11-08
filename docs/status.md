@@ -93,29 +93,33 @@ Enable users to define data generation rules for columns to produce realistic, c
 
 ## Active User Story
 
-### US 5.2 – Implement data-loader service for Redshift/Snowflake emulators (🔴 HIGH PRIORITY - NOT STARTED)
+### US 5.2 – Implement data-loader service for Redshift/Snowflake emulators (🟡 IN PROGRESS)
 
 **Goal:** Enable SQL queries against local Redshift and Snowflake emulators instead of SQLite, allowing users to test warehouse-specific SQL features.
 
-**Current Blocker:**
-The project infrastructure includes Redshift (PostgreSQL) and Snowflake (LocalStack) emulators in docker-compose.yml, but they are not being used. All data loading and querying currently happens against SQLite, which defeats the core project goal of simulating real warehouse environments.
+**Progress Summary:**
+The dual-database architecture has been implemented and tested. The system now supports separate metadata (SQLite) and warehouse (PostgreSQL/Redshift) databases. All 150 tests pass successfully.
 
 **Implementation Plan:**
 
-**Phase 1: Redshift Emulator Integration (P0)**
-1. **Update persistence layer configuration:**
-   - Add support for multiple database engines (SQLite for metadata, PostgreSQL for Redshift emulator)
-   - Add `DW_SIMULATOR_REDSHIFT_URL` environment variable pointing to `postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator`
-   - Modify `load_parquet_files_to_table()` to use Redshift connection for data loading
+**Phase 1: Redshift Emulator Integration (P0)** - IN PROGRESS
+1. **Update persistence layer configuration (✅ COMPLETE):**
+   - ✅ Dual-database architecture implemented with `metadata_engine` (SQLite) and `warehouse_engine` (PostgreSQL/Redshift)
+   - ✅ `DW_SIMULATOR_REDSHIFT_URL` environment variable configured in docker-compose.yml
+   - ✅ All data operations (create tables, load data, queries, delete, reset) use `warehouse_engine`
+   - ✅ Fixed transaction isolation issue to prevent database locks when both databases use same SQLite instance (testing)
+   - ✅ All 150 tests passing with 87% code coverage
 
-2. **Implement COPY command for Redshift:**
-   - Instead of inserting records directly, upload Parquet to LocalStack S3
+2. **Implement COPY command for Redshift (🔴 NOT STARTED):**
+   - Upload Parquet to LocalStack S3 after generation
    - Execute PostgreSQL `COPY FROM` command to load from S3 (simulating Redshift COPY)
    - Handle Redshift-specific data types and constraints
+   - Update data loading flow to use S3-based COPY instead of direct INSERT
 
-3. **Update query execution:**
-   - Modify `execute_query()` to run against Redshift emulator
-   - Test Redshift-specific SQL features (window functions, DISTKEY, SORTKEY, etc.)
+3. **Update query execution (✅ COMPLETE):**
+   - ✅ `execute_query()` already uses `warehouse_engine` for all SQL queries
+   - ✅ Queries run against warehouse database (Redshift/PostgreSQL when configured)
+   - Ready to test Redshift-specific SQL features once COPY command is implemented
 
 **Phase 2: Snowflake Emulator Integration (P1)**
 4. **Configure Snowflake emulator connection:**
@@ -146,6 +150,7 @@ The project infrastructure includes Redshift (PostgreSQL) and Snowflake (LocalSt
 **Risk:** LocalStack Snowflake emulator may have limited feature support
 
 ## Recent Work
+- **Dual-database architecture (US 5.2 Phase 1 Step 1 - ✅ COMPLETE):** Implemented and verified dual-database architecture with separate metadata (SQLite) and warehouse (PostgreSQL/Redshift) engines. Fixed transaction isolation issue in `create_experiment()` to prevent database locks. All data operations (create tables, load data, execute queries, delete, reset) now use `warehouse_engine`. Configuration support via `DW_SIMULATOR_REDSHIFT_URL` environment variable. All 150 tests passing with 87% code coverage.
 - **Parquet data loading (US 5.1 - ✅ COMPLETE):** Successfully completed all 6 steps of the implementation plan. Added auto-loading after generation, manual load command (`dw-sim experiment load`), API endpoint (`POST /api/experiments/{name}/load`), comprehensive test coverage (17 new tests: 7 service + 4 CLI + 4 API + 2 integration), and full documentation. All 150 tests passing with full end-to-end coverage achieved.
 - **Data generation rules (US 4.1):** Complete implementation of Faker rules for VARCHAR columns, numeric ranges (min/max) for INT/FLOAT columns, and date ranges for DATE columns. Added 4 comprehensive tests covering all acceptance criteria and extensive user documentation with examples.
 - **SQL Query Interface & Export (US 3.1-3.3):** Complete implementation of query execution, CSV export, and query script saving with full CLI/API support, comprehensive testing, and documentation.

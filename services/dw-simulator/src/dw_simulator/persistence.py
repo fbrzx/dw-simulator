@@ -171,7 +171,11 @@ class ExperimentPersistence:
     def create_experiment(self, schema: ExperimentSchema) -> ExperimentMetadata:
         """Persist metadata and create the physical tables for the experiment."""
 
+        created_at = None
+        schema_json = None
+
         try:
+            # First, create metadata in the metadata database
             with self.engine.begin() as conn:
                 if self._experiment_exists(conn, schema.name):
                     raise ExperimentAlreadyExistsError(
@@ -196,8 +200,26 @@ class ExperimentPersistence:
                             target_rows=table_schema.target_rows,
                         )
                     )
-                self._create_data_tables(schema, conn)
+
+            # Then, create physical tables in the warehouse database (separate transaction)
+            try:
+                self._create_data_tables(schema)
+            except Exception as exc:
+                # If warehouse table creation fails, rollback metadata
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        self._experiment_tables.delete().where(
+                            self._experiment_tables.c.experiment_name == schema.name
+                        )
+                    )
+                    conn.execute(self._experiments.delete().where(self._experiments.c.name == schema.name))
+                raise ExperimentMaterializationError(
+                    f"Failed to create warehouse tables for experiment '{schema.name}': {exc}"
+                ) from exc
+
         except ExperimentAlreadyExistsError:
+            raise
+        except ExperimentMaterializationError:
             raise
         except SQLAlchemyError as exc:
             raise ExperimentMaterializationError(f"Failed to create experiment '{schema.name}': {exc}") from exc
@@ -730,12 +752,11 @@ class ExperimentPersistence:
         ).first()
         return result is not None
 
-    def _create_data_tables(self, schema: ExperimentSchema, conn: Connection) -> None:
+    def _create_data_tables(self, schema: ExperimentSchema) -> None:
         """
         Create physical data tables in the warehouse database (PostgreSQL/Redshift).
-        The conn parameter is from the metadata database but is kept for compatibility.
+        Uses a separate transaction on warehouse_engine.
         """
-        # Use warehouse engine for physical table creation
         inspector = inspect(self.warehouse_engine)
         for table_schema in schema.tables:
             table_name = self._physical_table_name(schema.name, table_schema.name)
