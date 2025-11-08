@@ -213,13 +213,53 @@ This approach balances practical synthetic data generation (which benefits from 
 
 #### A. Component Breakdown (Microservices/Utilities)
 
-| Component | Type | Core Capability | Dependency (Base Image) |
-| :--- | :--- | :--- | :--- |
-| **`synthetic-data-generator`** | Utility/Job | Generates schema-compliant synthetic data (Parquet files). | Python (using SDV/Faker/Pydantic) |
-| **`local-snowflake-emulator`** | Service (Emulator) | Simulates Snowflake's SQL, connectivity, and data loading features. | LocalStack (with Snowflake feature enabled) |
-| **`local-redshift-mock`** | Service (Mock DW) | Provides a PostgreSQL endpoint with Redshift-specific SQL mocking capabilities. | `postgres:15-alpine` (with Redshift mock extensions) |
-| **`local-s3-staging`** | Service (Emulator) | Acts as the local data staging area (e.g., for Snowpipe/Redshift `COPY`). | LocalStack (S3 feature) |
-| **`data-loader-utility`** | Utility/Job | Containerized Python/dbt job to execute Snowpipe/COPY commands to load data from local S3 to the local DWs. | Python/Data Client SDKs |
+| Component | Type | Core Capability | Dependency (Base Image) | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **`synthetic-data-generator`** | Utility/Job | Generates schema-compliant synthetic data (Parquet files). | Python (using SDV/Faker/Pydantic) | ✅ **Implemented** |
+| **`local-snowflake-emulator`** | Service (Emulator) | Simulates Snowflake's SQL, connectivity, and data loading features. | LocalStack (with Snowflake feature enabled) | ⚠️ **Running but Unused** |
+| **`local-redshift-mock`** | Service (Mock DW) | Provides a PostgreSQL endpoint with Redshift-specific SQL mocking capabilities. | `postgres:15-alpine` (with Redshift mock extensions) | ⚠️ **Running but Unused** |
+| **`local-s3-staging`** | Service (Emulator) | Acts as the local data staging area (e.g., for Snowpipe/Redshift `COPY`). | LocalStack (S3 feature) | ⚠️ **Running but Unused** |
+| **`data-loader-utility`** | Utility/Job | Containerized Python/dbt job to execute Snowpipe/COPY commands to load data from local S3 to the local DWs. | Python/Data Client SDKs | 🔴 **Not Implemented** |
+
+**Current Implementation Note:**
+The current system loads all data into **SQLite** using direct SQLAlchemy inserts from Parquet files. The Redshift/Snowflake emulators and S3 staging are configured in docker-compose.yml but not yet integrated into the data loading pipeline. This is tracked as **US 5.2** in the implementation roadmap.
+
+#### NEW: Data Loader Service Implementation Roadmap (US 5.2)
+
+To achieve the core project goal of querying against actual warehouse emulators, the following implementation is required:
+
+**Phase 1: Dual-Database Architecture**
+- **Metadata Database (SQLite):** Continue using SQLite for experiment metadata, schemas, and generation run tracking
+- **Data Warehouse (PostgreSQL/Redshift):** Load generated data into the PostgreSQL-based Redshift emulator
+- **Connection Management:** Implement `ExperimentPersistence` with two database connections:
+  - `metadata_engine` → SQLite (experiments, experiment_tables, generation_runs)
+  - `warehouse_engine` → PostgreSQL (actual data tables)
+
+**Phase 2: S3-Based Loading Pipeline**
+1. **Upload to S3:** After generation, upload Parquet files to LocalStack S3 (`s3://local/dw-simulator/staging/<experiment>/<table>/`)
+2. **Execute COPY Command:** Use PostgreSQL `COPY FROM PROGRAM` or S3-compatible extensions to load from staged files
+3. **Metadata Tracking:** Record S3 URIs in generation_runs table for reproducibility
+
+**Phase 3: Query Routing**
+- Modify `execute_query()` to run against `warehouse_engine` instead of metadata engine
+- Support Redshift-specific SQL syntax (DISTKEY, SORTKEY, window functions)
+- Add connection pooling for query performance
+
+**Phase 4: Multi-Warehouse Support (Future)**
+- Add `target_warehouse` field to ExperimentSchema (sqlite/redshift/snowflake)
+- Implement warehouse-specific adapters (RedshiftAdapter, SnowflakeAdapter)
+- Allow per-experiment warehouse selection in CLI/API/UI
+
+**Benefits:**
+- ✅ Test Redshift-specific SQL features (DISTKEY, SORTKEY, SUPER data type)
+- ✅ Validate query performance characteristics similar to production
+- ✅ Enable Snowflake-specific features (VARIANT, semi-structured data)
+- ✅ Support multi-warehouse testing workflows
+
+**Technical Considerations:**
+- LocalStack Snowflake emulator has limited feature support (may require fallback to PostgreSQL for advanced features)
+- PostgreSQL COPY commands require CSV format or custom extensions for Parquet (may need conversion step)
+- Connection management complexity increases (need robust error handling for multiple databases)
 
 #### B. Inter-Service Communication
 

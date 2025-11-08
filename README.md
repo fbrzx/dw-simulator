@@ -9,8 +9,28 @@ under `./services` and is orchestrated via `docker-compose.yml`.
 - `services/dw-simulator` – Python synthetic data generator + CLI + FastAPI server (runs as
   the `synthetic-data-generator` Docker Compose service).
 - `services/web-ui` – Static web UI for managing experiments, generating data, and executing SQL queries.
-- `services/data-loader` – Placeholder for the batch/ELT worker that moves
-  staged Parquet data into the local Redshift/Snowflake mocks.
+- `services/data-loader` – ⚠️ **Not yet implemented.** Planned batch/ELT worker that will move
+  staged Parquet data into the local Redshift/Snowflake emulators.
+
+### ⚠️ Current Implementation Note
+
+**Current State:**
+- All experiment data is currently loaded into **SQLite** (not Redshift/Snowflake emulators)
+- SQL queries run against SQLite using standard ANSI SQL
+- The Redshift (PostgreSQL) and Snowflake (LocalStack) emulators are configured in docker-compose.yml but not yet integrated
+
+**Why this matters:**
+- ✅ Current implementation: Fast prototyping, full SQL support, works for basic testing
+- ❌ Missing: Cannot test Redshift-specific features (DISTKEY, SORTKEY, SUPER type)
+- ❌ Missing: Cannot test Snowflake-specific features (VARIANT, semi-structured data)
+- ❌ Missing: Query performance characteristics differ from actual warehouses
+
+**Roadmap:**
+- See **US 5.2** in `docs/status.md` for the implementation plan
+- Goal: Enable dual-database architecture (SQLite for metadata, PostgreSQL/Snowflake for data)
+- Estimated timeline: 5-7 days of development work
+
+If testing warehouse-specific SQL features is critical for your use case, please prioritize US 5.2 implementation.
 
 ## Developing the Python service
 
