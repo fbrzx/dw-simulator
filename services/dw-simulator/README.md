@@ -145,6 +145,31 @@ dw-sim experiment generate my_experiment --output-dir /tmp/my-data
 - Validates uniqueness constraints across batches
 - Enforces date ranges, numeric ranges, and VARCHAR length limits
 - Supports Faker rules for realistic data generation (e.g., `first_name`, `email`)
+- Supports statistical distribution configs for numeric columns (normal, exponential, beta) with deterministic seeding
+
+#### Statistical distribution configuration
+
+Add an optional `distribution` block to INT or FLOAT columns in your JSON schema to control the
+shape of generated values:
+
+```json
+{
+  "name": "score",
+  "data_type": "FLOAT",
+  "distribution": {
+    "type": "normal",
+    "parameters": {"mean": 75, "stddev": 12}
+  }
+}
+```
+
+- `type` supports `normal`, `exponential`, and `beta`.
+- Parameters are validated according to the distribution (e.g., `stddev > 0`).
+- CLI creation echoes a summary of distribution-configured columns to confirm the wiring.
+- `GET /api/experiments` exposes a `distributions` array so the Web UI can display hints alongside warnings.
+
+The Web UI’s generate modal also surfaces distribution details per table, making it easy to verify configuration before
+launching a new run.
 
 By default both the SQLite metadata database and generated Parquet files live in the repo-level,
 git-ignored `data/` directory:

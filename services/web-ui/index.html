@@ -98,7 +98,7 @@
 
               <details>
                 <summary>Sample JSON schema</summary>
-                <pre>{
+              <pre>{
   "name": "customers_experiment",
   "tables": [
     {
@@ -106,7 +106,15 @@
       "target_rows": 1000,
       "columns": [
         {"name": "customer_id", "data_type": "INT", "is_unique": true},
-        {"name": "email", "data_type": "VARCHAR", "varchar_length": 255}
+        {"name": "email", "data_type": "VARCHAR", "varchar_length": 255},
+        {
+          "name": "lifetime_value",
+          "data_type": "FLOAT",
+          "distribution": {
+            "type": "normal",
+            "parameters": {"mean": 500, "stddev": 120}
+          }
+        }
       ]
     }
   ]

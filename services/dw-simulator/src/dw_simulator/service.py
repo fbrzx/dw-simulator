@@ -499,6 +499,30 @@ class ExperimentService:
         except (ValidationError, ValueError):
             return []
 
+    @staticmethod
+    def summarize_distribution_configs(schema: ExperimentSchema) -> list[dict[str, Any]]:
+        """Return distribution summaries for columns configured with statistical distributions."""
+
+        summaries: list[dict[str, Any]] = []
+        for table in schema.tables:
+            for column in table.columns:
+                if column.distribution is None:
+                    continue
+
+                summaries.append(
+                    {
+                        "table": table.name,
+                        "column": column.name,
+                        "type": column.distribution.type,
+                        "parameters": {
+                            key: column.distribution.parameters[key]
+                            for key in sorted(column.distribution.parameters)
+                        },
+                    }
+                )
+
+        return summaries
+
     def _collect_generated_artifact_paths(
         self,
         experiment_name: str,

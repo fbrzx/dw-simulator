@@ -160,6 +160,49 @@ def test_list_experiments_with_no_warnings(client: TestClient) -> None:
     assert experiments[0]["warnings"] == []
 
 
+def test_list_experiments_includes_distribution_summary(client: TestClient) -> None:
+    """GET /api/experiments surfaces distribution-configured columns."""
+
+    schema = {
+        "name": "DistributionApi",
+        "tables": [
+            {
+                "name": "metrics",
+                "target_rows": 5,
+                "columns": [
+                    {"name": "metric_id", "data_type": "INT", "is_unique": True},
+                    {
+                        "name": "score",
+                        "data_type": "FLOAT",
+                        "distribution": {
+                            "type": "beta",
+                            "parameters": {"alpha": 2, "beta": 5},
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    create_response = client.post("/api/experiments", json=schema)
+    assert create_response.status_code == 201
+
+    list_response = client.get("/api/experiments")
+    assert list_response.status_code == 200
+    experiments = list_response.json()["experiments"]
+    assert len(experiments) == 1
+
+    distribution_summary = experiments[0].get("distributions")
+    assert distribution_summary == [
+        {
+            "table": "metrics",
+            "column": "score",
+            "type": "beta",
+            "parameters": {"alpha": 2, "beta": 5},
+        }
+    ]
+
+
 def test_reset_experiment_success(client: TestClient) -> None:
     """Test successful experiment reset via API."""
     # Create experiment first

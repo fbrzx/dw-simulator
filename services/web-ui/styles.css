@@ -278,6 +278,21 @@ label {
   gap: 0.35rem;
 }
 
+.distribution-summary {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: #f0f3f8;
+}
+
+.distribution-summary ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.distribution-summary li {
+  margin: 0.15rem 0;
+}
+
 button.warning-badge {
   align-self: flex-start;
   background: transparent;
@@ -386,6 +401,23 @@ pre {
   color: #8b949e;
   font-size: 0.85rem;
   margin-bottom: 0.5rem;
+}
+
+.distribution-details {
+  margin-top: 0.5rem;
+}
+
+.distribution-details summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #58a6ff;
+}
+
+.distribution-details ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+  color: #cbd5f5;
 }
 
 /* Button variants */

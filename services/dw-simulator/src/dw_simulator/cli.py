@@ -18,7 +18,9 @@ import uvicorn
 
 from . import __version__
 from .config import get_stage_bucket, get_target_db_url
-from .schema import WarehouseType
+from pydantic import ValidationError
+
+from .schema import ExperimentSchema, WarehouseType
 from .service import (
     ExperimentCreateResult,
     ExperimentDeleteResult,
@@ -109,6 +111,12 @@ def create_experiment(schema_file: Path = typer.Argument(..., help="Path to the 
         f"Experiment '{result.metadata.name}' created{warehouse_info} with {len(result.metadata.schema_json)} bytes of schema.",
         fg=typer.colors.GREEN,
     )
+
+    distribution_lines = _summarize_distribution_columns(result.metadata.schema_json)
+    if distribution_lines:
+        typer.secho("Distribution-configured columns:", fg=typer.colors.CYAN)
+        for line in distribution_lines:
+            typer.echo(line)
 
 
 @experiment_app.command("delete")
@@ -304,6 +312,31 @@ def _print_query_errors_and_exit(result: QueryExecutionResult) -> None:
     for error in result.errors:
         typer.secho(error, err=True, fg=typer.colors.RED)
     raise typer.Exit(code=1)
+
+
+def _summarize_distribution_columns(schema_json: str) -> list[str]:
+    """Return formatted lines describing distribution-configured columns."""
+
+    try:
+        schema = ExperimentSchema.model_validate_json(schema_json)
+    except (ValidationError, ValueError):
+        return []
+
+    lines: list[str] = []
+    for table in schema.tables:
+        for column in table.columns:
+            if column.distribution is None:
+                continue
+
+            parameters = ", ".join(
+                f"{key}={column.distribution.parameters[key]}"
+                for key in sorted(column.distribution.parameters)
+            )
+            lines.append(
+                f" - {table.name}.{column.name}: {column.distribution.type} ({parameters})"
+            )
+
+    return lines
 
 
 if __name__ == "__main__":  # pragma: no cover
