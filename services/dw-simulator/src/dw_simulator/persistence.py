@@ -548,14 +548,36 @@ class ExperimentPersistence:
 
         return reset_count
 
-    def execute_query(self, sql: str) -> QueryResult:
+    def execute_query(self, sql: str, experiment_name: str | None = None) -> QueryResult:
         """
         Execute a SQL query against the warehouse database (Redshift/PostgreSQL).
+
+        If experiment_name is provided, creates temporary views that map simple table names
+        to the physical experiment__table names, allowing queries like "SELECT * FROM customers"
+        instead of "SELECT * FROM experiment__customers".
+
         Raises QueryExecutionError if the query fails.
         """
         try:
             # Execute query against warehouse database (where actual data lives)
             with self.warehouse_engine.connect() as conn:
+                # If experiment is specified, create temporary views for easier querying
+                if experiment_name:
+                    # Get the list of tables for this experiment
+                    table_rows = conn.execute(
+                        select(self._experiment_tables.c.table_name).where(
+                            self._experiment_tables.c.experiment_name == experiment_name
+                        )
+                    ).all()
+
+                    # Create temporary views for each table
+                    for row in table_rows:
+                        logical_name = row.table_name
+                        physical_name = self._physical_table_name(experiment_name, logical_name)
+                        # Create or replace a temporary view with the simple table name
+                        conn.execute(text(f'CREATE OR REPLACE TEMP VIEW "{logical_name}" AS SELECT * FROM "{physical_name}"'))
+
+                # Execute the user's query
                 result = conn.execute(text(sql))
 
                 # Get column names from keys()
@@ -762,7 +784,9 @@ class ExperimentPersistence:
             table_name = self._physical_table_name(schema.name, table_schema.name)
             if inspector.has_table(table_name):
                 raise ExperimentMaterializationError(
-                    f"Physical table '{table_name}' already exists. Choose a different experiment/table name."
+                    f"Physical table '{table_name}' already exists. This may be due to orphaned tables from a previous experiment. "
+                    f"Either choose a different experiment/table name, or manually drop the table using SQL query interface: "
+                    f"DROP TABLE {table_name};"
                 )
 
             metadata = MetaData()

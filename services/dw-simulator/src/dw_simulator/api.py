@@ -52,6 +52,7 @@ class SqlImportPayload(BaseModel):
 class QueryExecutePayload(BaseModel):
     sql: str = Field(..., description="SQL query to execute.")
     format: str = Field("json", description="Result format: 'json' or 'csv'.")
+    experiment_name: str | None = Field(None, description="Optional experiment name to create temporary views for simplified querying.")
 
 
 def create_app(service: ExperimentService | None = None) -> FastAPI:
@@ -233,8 +234,13 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
 
     @app.post("/api/query/execute", response_model=None)
     def execute_query(payload: QueryExecutePayload) -> dict[str, Any] | Response:
-        """Execute a SQL query and return results in JSON or CSV format."""
-        result = _service().execute_query(payload.sql)
+        """
+        Execute a SQL query and return results in JSON or CSV format.
+
+        If experiment_name is provided, creates temporary views for simplified querying,
+        allowing table references without the experiment__ prefix.
+        """
+        result = _service().execute_query(payload.sql, experiment_name=payload.experiment_name)
 
         if not result.success or not result.result:
             raise HTTPException(

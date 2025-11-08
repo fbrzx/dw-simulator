@@ -14,55 +14,69 @@
       </header>
 
       <main>
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Experiments</h2>
-            <button id="refresh-btn" type="button">Refresh</button>
-          </div>
-          <div
-            id="warning-banner"
-            class="warning-banner hidden"
-            role="alert"
-            aria-live="polite"
-          ></div>
-          <div id="status" role="status" aria-live="polite"></div>
-          <ul id="experiment-list" class="experiment-list"></ul>
-        </section>
+        <!-- Tab Navigation -->
+        <div class="main-tabs">
+          <button type="button" class="main-tab active" data-tab="experiments">Experiments</button>
+          <button type="button" class="main-tab" data-tab="create">Create Experiment</button>
+          <button type="button" class="main-tab" data-tab="query">SQL Query</button>
+        </div>
 
-        <section class="panel">
-          <h2>Create Experiment</h2>
-          <div class="mode-tabs">
-            <button type="button" class="mode-tab active" data-mode="json">JSON Schema</button>
-            <button type="button" class="mode-tab" data-mode="sql">SQL Import</button>
-          </div>
-
-          <form id="json-form">
-            <label for="schema-input">Paste experiment JSON schema</label>
-            <textarea id="schema-input" rows="12" required></textarea>
-            <div class="actions">
-              <button type="submit">Create Experiment</button>
+        <!-- Tab Content -->
+        <div class="tab-content">
+          <!-- Experiments Tab -->
+          <section id="tab-experiments" class="tab-panel active">
+            <div class="panel">
+              <div class="panel-header">
+                <h2>Experiments</h2>
+                <button id="refresh-btn" type="button">Refresh</button>
+              </div>
+              <div
+                id="warning-banner"
+                class="warning-banner hidden"
+                role="alert"
+                aria-live="polite"
+              ></div>
+              <div id="status" role="status" aria-live="polite"></div>
+              <ul id="experiment-list" class="experiment-list"></ul>
             </div>
-          </form>
+          </section>
 
-          <form id="sql-form" class="hidden">
-            <label for="sql-experiment-name">Experiment name</label>
-            <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
-            <label for="dialect-select">Dialect</label>
-            <select id="dialect-select">
-              <option value="redshift">Amazon Redshift</option>
-              <option value="snowflake">Snowflake</option>
-              <option value="ansi">ANSI</option>
-            </select>
-            <label for="sql-input">Paste SQL (CREATE TABLE ...)</label>
-            <textarea id="sql-input" rows="12" required></textarea>
-            <div class="actions">
-              <button type="submit">Import SQL</button>
-            </div>
-          </form>
+          <!-- Create Experiment Tab -->
+          <section id="tab-create" class="tab-panel">
+            <div class="panel">
+              <h2>Create Experiment</h2>
+              <div class="mode-tabs">
+                <button type="button" class="mode-tab active" data-mode="json">JSON Schema</button>
+                <button type="button" class="mode-tab" data-mode="sql">SQL Import</button>
+              </div>
 
-          <details>
-            <summary>Sample JSON schema</summary>
-            <pre>{
+              <form id="json-form">
+                <label for="schema-input">Paste experiment JSON schema</label>
+                <textarea id="schema-input" rows="12" required></textarea>
+                <div class="actions">
+                  <button type="submit">Create Experiment</button>
+                </div>
+              </form>
+
+              <form id="sql-form" class="hidden">
+                <label for="sql-experiment-name">Experiment name</label>
+                <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
+                <label for="dialect-select">Dialect</label>
+                <select id="dialect-select">
+                  <option value="redshift">Amazon Redshift</option>
+                  <option value="snowflake">Snowflake</option>
+                  <option value="ansi">ANSI</option>
+                </select>
+                <label for="sql-input">Paste SQL (CREATE TABLE ...)</label>
+                <textarea id="sql-input" rows="12" required></textarea>
+                <div class="actions">
+                  <button type="submit">Import SQL</button>
+                </div>
+              </form>
+
+              <details>
+                <summary>Sample JSON schema</summary>
+                <pre>{
   "name": "customers_experiment",
   "tables": [
     {
@@ -75,42 +89,53 @@
     }
   ]
 }</pre>
-          </details>
-        </section>
-
-        <section class="panel">
-          <h2>SQL Query Interface</h2>
-          <p class="query-description">Execute SQL queries against your populated experiments and export results.</p>
-
-          <form id="query-form">
-            <label for="query-input">SQL Query</label>
-            <textarea
-              id="query-input"
-              rows="8"
-              placeholder="SELECT * FROM experiment_name__table_name LIMIT 10;"
-              required
-            ></textarea>
-
-            <div class="query-actions">
-              <button type="submit" class="primary">Execute Query</button>
-              <button type="button" id="clear-query-btn" class="secondary">Clear</button>
-              <button type="button" id="save-query-btn" class="secondary">Save SQL</button>
+              </details>
             </div>
-          </form>
+          </section>
 
-          <div id="query-status" class="query-status" role="status" aria-live="polite"></div>
+          <!-- SQL Query Tab -->
+          <section id="tab-query" class="tab-panel">
+            <div class="panel">
+              <h2>SQL Query Interface</h2>
+              <p class="query-description">Execute SQL queries against your populated experiments and export results.</p>
 
-          <div id="query-results-container" class="hidden">
-            <div class="results-header">
-              <h3>Query Results</h3>
-              <div class="results-actions">
-                <span id="row-count-display"></span>
-                <button type="button" id="export-csv-btn" class="secondary">Export CSV</button>
+              <form id="query-form">
+                <label for="experiment-select">Experiment (optional)</label>
+                <select id="experiment-select">
+                  <option value="">None - Use full table names (experiment__table)</option>
+                </select>
+                <small class="query-hint">Select an experiment to use simple table names (e.g., "customers" instead of "experiment__customers")</small>
+
+                <label for="query-input">SQL Query</label>
+                <textarea
+                  id="query-input"
+                  rows="8"
+                  placeholder="SELECT * FROM customers LIMIT 10;"
+                  required
+                ></textarea>
+
+                <div class="query-actions">
+                  <button type="submit" class="primary">Execute Query</button>
+                  <button type="button" id="clear-query-btn" class="secondary">Clear</button>
+                  <button type="button" id="save-query-btn" class="secondary">Save SQL</button>
+                </div>
+              </form>
+
+              <div id="query-status" class="query-status" role="status" aria-live="polite"></div>
+
+              <div id="query-results-container" class="hidden">
+                <div class="results-header">
+                  <h3>Query Results</h3>
+                  <div class="results-actions">
+                    <span id="row-count-display"></span>
+                    <button type="button" id="export-csv-btn" class="secondary">Export CSV</button>
+                  </div>
+                </div>
+                <div id="query-results" class="query-results"></div>
               </div>
             </div>
-            <div id="query-results" class="query-results"></div>
-          </div>
-        </section>
+          </section>
+        </div>
       </main>
     </div>
 

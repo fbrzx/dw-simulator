@@ -429,13 +429,18 @@ class ExperimentService:
         """Get metadata for a specific generation run."""
         return self.persistence.get_generation_run(run_id)
 
-    def execute_query(self, sql: str) -> QueryExecutionResult:
+    def execute_query(self, sql: str, experiment_name: str | None = None) -> QueryExecutionResult:
         """
         Execute a SQL query and return the results.
+
+        If experiment_name is provided, creates temporary views for the experiment's tables,
+        allowing queries using simple table names (e.g., "customers") instead of prefixed names
+        (e.g., "experiment__customers").
+
         Handles errors and provides user-friendly feedback.
         """
         try:
-            result = self.persistence.execute_query(sql)
+            result = self.persistence.execute_query(sql, experiment_name=experiment_name)
             return QueryExecutionResult(success=True, result=result)
         except QueryExecutionError as exc:
             return QueryExecutionResult(success=False, errors=[str(exc)])

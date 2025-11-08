@@ -10,6 +10,23 @@ const dialectSelect = document.getElementById('dialect-select');
 const modeTabs = document.querySelectorAll('.mode-tab');
 const warningBanner = document.getElementById('warning-banner');
 
+// Main tab handling
+const mainTabs = document.querySelectorAll('.main-tab');
+const tabPanels = document.querySelectorAll('.tab-panel');
+
+const switchMainTab = (tabName) => {
+  mainTabs.forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.tab === tabName);
+  });
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle('active', panel.id === `tab-${tabName}`);
+  });
+};
+
+mainTabs.forEach((tab) => {
+  tab.addEventListener('click', () => switchMainTab(tab.dataset.tab));
+});
+
 const setStatus = (message, type = 'info') => {
   if (!statusEl) return;
   statusEl.textContent = message;
@@ -81,6 +98,7 @@ const fetchExperiments = async () => {
     const data = await response.json();
     const experiments = data.experiments ?? [];
     renderExperiments(experiments);
+    populateExperimentSelector(experiments);
     setStatus(`Loaded ${experiments.length} experiment(s).`);
   } catch (error) {
     console.error(error);
@@ -520,6 +538,7 @@ runsModal.addEventListener('click', (e) => {
 // Query Interface
 const queryForm = document.getElementById('query-form');
 const queryInput = document.getElementById('query-input');
+const experimentSelect = document.getElementById('experiment-select');
 const queryStatus = document.getElementById('query-status');
 const queryResultsContainer = document.getElementById('query-results-container');
 const queryResults = document.getElementById('query-results');
@@ -529,6 +548,23 @@ const saveQueryBtn = document.getElementById('save-query-btn');
 const exportCsvBtn = document.getElementById('export-csv-btn');
 
 let lastQueryResult = null;
+
+const populateExperimentSelector = (experiments) => {
+  // Keep the "None" option
+  const noneOption = experimentSelect.querySelector('option[value=""]');
+  experimentSelect.innerHTML = '';
+  if (noneOption) {
+    experimentSelect.appendChild(noneOption);
+  }
+
+  // Add experiment options
+  experiments.forEach((experiment) => {
+    const option = document.createElement('option');
+    option.value = experiment.name;
+    option.textContent = experiment.name;
+    experimentSelect.appendChild(option);
+  });
+};
 
 const setQueryStatus = (message, type = 'info') => {
   if (!queryStatus) return;
@@ -560,10 +596,16 @@ const executeQuery = async (event) => {
   setQueryStatus('Executing query...');
 
   try {
+    const experimentName = experimentSelect.value || null;
+    const payload = { sql, format: 'json' };
+    if (experimentName) {
+      payload.experiment_name = experimentName;
+    }
+
     const response = await fetch(`${API_BASE}/query/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, format: 'json' }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -668,10 +710,16 @@ const exportCsv = async () => {
   setQueryStatus('Exporting to CSV...');
 
   try {
+    const experimentName = experimentSelect.value || null;
+    const payload = { sql, format: 'csv' };
+    if (experimentName) {
+      payload.experiment_name = experimentName;
+    }
+
     const response = await fetch(`${API_BASE}/query/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, format: 'csv' }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
