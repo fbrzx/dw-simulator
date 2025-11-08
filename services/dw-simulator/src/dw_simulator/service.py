@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import shutil
+import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,7 @@ from pydantic import ValidationError
 
 from .config import get_data_root
 from .persistence import (
+    DataLoadError,
     ExperimentAlreadyExistsError,
     ExperimentMaterializationError,
     ExperimentMetadata,
@@ -223,11 +225,20 @@ class ExperimentService:
                 errors=[f"Invalid schema stored for '{experiment_name}': {exc}"]
             )
 
+        # Resolve the output directory so both the generator and persistence
+        # record the same location.
+        data_root = get_data_root()
+        if output_dir is not None:
+            effective_output_dir = Path(output_dir)
+        else:
+            timestamp = int(time.time())
+            effective_output_dir = data_root / "generated" / experiment_name / str(timestamp)
+
         # Start generation run with concurrent job guard
         try:
             run_id = self.persistence.start_generation_run(
                 experiment_name=experiment_name,
-                output_path=str(output_dir) if output_dir else None,
+                output_path=str(effective_output_dir),
                 seed=seed,
             )
         except GenerationAlreadyRunningError as exc:
@@ -246,7 +257,7 @@ class ExperimentService:
             summary = self.generator.generate(
                 GenerationRequest(
                     schema=schema,
-                    output_root=output_dir,
+                    output_root=effective_output_dir,
                     row_overrides={k: int(v) for k, v in (rows or {}).items()},
                     seed=seed,
                 )
@@ -257,18 +268,46 @@ class ExperimentService:
                 table_result.table_name: table_result.row_count
                 for table_result in summary.tables
             }
-            row_counts_json = json.dumps(row_counts_dict)
+            # Mark run as generated (before loading). Store generated counts.
+            self.persistence.complete_generation_run(
+                run_id,
+                json.dumps({"generated": row_counts_dict}),
+            )
 
-            # Mark run as completed
-            self.persistence.complete_generation_run(run_id, row_counts_json)
+            # Attempt to load Parquet files into the warehouse tables.
+            try:
+                loaded_row_counts = self.persistence.load_generation_run(run_id)
+            except (ExperimentNotFoundError, DataLoadError) as load_exc:
+                error_message = f"Data load failed for experiment '{experiment_name}': {load_exc}"
+                try:
+                    self.persistence.fail_generation_run(run_id, error_message)
+                except Exception:
+                    pass
 
-            # Fetch the completed run metadata
+                run_metadata = self.persistence.get_generation_run(run_id)
+                return ExperimentGenerateResult(
+                    success=False,
+                    errors=[error_message],
+                    summary=summary,
+                    run_metadata=run_metadata,
+                    run_id=run_id,
+                )
+
+            # Persist combined generated + loaded row counts for observability.
+            combined_counts = {
+                "generated": row_counts_dict,
+                "loaded": loaded_row_counts,
+            }
+            self.persistence.complete_generation_run(run_id, json.dumps(combined_counts))
+
+            # Fetch the completed run metadata (now including load info)
             run_metadata = self.persistence.get_generation_run(run_id)
 
             return ExperimentGenerateResult(
                 success=True,
                 summary=summary,
                 run_metadata=run_metadata,
+                loaded_row_counts=loaded_row_counts,
             )
 
         except (GenerationError, ValueError, TypeError) as exc:
@@ -442,6 +481,7 @@ class ExperimentGenerateResult:
     summary: GenerationResult | None = None
     run_metadata: GenerationRunMetadata | None = None
     run_id: int | None = None
+    loaded_row_counts: Mapping[str, int] | None = None
 
 
 __all__ = [

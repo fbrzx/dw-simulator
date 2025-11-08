@@ -15,6 +15,7 @@ from dw_simulator.generator import (
     TableGenerationResult,
 )
 from dw_simulator.persistence import (
+    DataLoadError,
     ExperimentAlreadyExistsError,
     ExperimentMaterializationError,
     ExperimentMetadata,
@@ -54,6 +55,8 @@ class StubPersistence:
     fail_run_exception: Exception | None = None
     query_result: QueryResult | None = None
     query_exception: Exception | None = None
+    load_return: dict[str, int] | None = None
+    load_exception: Exception | None = None
 
     def __post_init__(self) -> None:
         self.recorded_schema: ExperimentSchema | None = None
@@ -62,6 +65,7 @@ class StubPersistence:
         self.runs: dict[int, GenerationRunMetadata] = {}
         self.started_runs: list[tuple[str, str | None, int | None]] = []
         self.executed_queries: list[str] = []
+        self.loaded_runs: list[int] = []
 
     def create_experiment(self, schema: ExperimentSchema) -> ExperimentMetadata:
         self.recorded_schema = schema
@@ -158,6 +162,12 @@ class StubPersistence:
         if self.query_result is None:
             raise RuntimeError("StubPersistence requires query_result when no exception is set.")
         return self.query_result
+
+    def load_generation_run(self, run_id: int) -> dict[str, int]:
+        self.loaded_runs.append(run_id)
+        if self.load_exception:
+            raise self.load_exception
+        return self.load_return or {}
 
 
 def valid_payload() -> dict[str, Any]:
@@ -354,7 +364,7 @@ def test_delete_experiment_cleans_generated_artifacts(tmp_path: Path, monkeypatc
 
 def test_generate_data_success(tmp_path: Path) -> None:
     metadata = build_metadata()
-    stub_persistence = StubPersistence(metadata=metadata)
+    stub_persistence = StubPersistence(metadata=metadata, load_return={"customers": 5})
     generation_result = GenerationResult(
         experiment_name="ServiceExperiment",
         output_dir=tmp_path / "out",
@@ -366,6 +376,8 @@ def test_generate_data_success(tmp_path: Path) -> None:
     result = service.generate_data("ServiceExperiment", rows={"customers": 5}, seed=123)
     assert result.success is True
     assert result.summary == generation_result
+    assert result.loaded_row_counts == {"customers": 5}
+    assert stub_persistence.loaded_runs == [1]
 
 
 def test_generate_data_missing_experiment() -> None:
@@ -421,7 +433,7 @@ def test_create_experiment_from_sql_invalid_dialect() -> None:
 def test_generate_data_creates_generation_run(tmp_path: Path) -> None:
     """Test that generate_data creates a generation run record."""
     metadata = build_metadata()
-    stub_persistence = StubPersistence(metadata=metadata)
+    stub_persistence = StubPersistence(metadata=metadata, load_return={})
     generation_result = GenerationResult(
         experiment_name="ServiceExperiment",
         output_dir=tmp_path / "out",
@@ -435,12 +447,19 @@ def test_generate_data_creates_generation_run(tmp_path: Path) -> None:
     assert len(stub_persistence.started_runs) == 1
     assert stub_persistence.started_runs[0][0] == "ServiceExperiment"
     assert stub_persistence.started_runs[0][2] == 42  # seed
+    assert stub_persistence.started_runs[0][1] == str(tmp_path)
 
 
 def test_generate_data_completes_run_on_success(tmp_path: Path) -> None:
     """Test that successful generation marks run as completed with row counts."""
     metadata = build_metadata()
-    stub_persistence = StubPersistence(metadata=metadata)
+    stub_persistence = StubPersistence(
+        metadata=metadata,
+        load_return={
+            "customers": 100,
+            "orders": 500,
+        },
+    )
     generation_result = GenerationResult(
         experiment_name="ServiceExperiment",
         output_dir=tmp_path / "out",
@@ -458,6 +477,11 @@ def test_generate_data_completes_run_on_success(tmp_path: Path) -> None:
     assert result.run_metadata.status == GenerationStatus.COMPLETED
     assert '"customers": 100' in result.run_metadata.row_counts
     assert '"orders": 500' in result.run_metadata.row_counts
+    assert '"loaded"' in result.run_metadata.row_counts
+    assert result.loaded_row_counts == {
+        "customers": 100,
+        "orders": 500,
+    }
 
 
 def test_generate_data_fails_run_on_error() -> None:
@@ -479,6 +503,28 @@ def test_generate_data_fails_run_on_error() -> None:
     assert run is not None
     assert run.status == GenerationStatus.FAILED
     assert "Unable to generate unique values" in run.error_message or "Unable to generate unique values" in result.errors[0]
+
+
+def test_generate_data_reports_load_failure(tmp_path: Path) -> None:
+    """If loading Parquet files fails, the error is surfaced and run marked failed."""
+    metadata = build_metadata()
+    stub_persistence = StubPersistence(metadata=metadata, load_exception=DataLoadError("load exploded"))
+    generation_result = GenerationResult(
+        experiment_name="ServiceExperiment",
+        output_dir=tmp_path / "out",
+        tables=[TableGenerationResult(table_name="customers", row_count=50, files=[])],
+    )
+    stub_generator = StubGenerator(result=generation_result)
+    service = ExperimentService(persistence=stub_persistence, generator=stub_generator)  # type: ignore[arg-type]
+
+    result = service.generate_data("ServiceExperiment", output_dir=tmp_path / "out")
+
+    assert result.success is False
+    assert any("load exploded" in err for err in result.errors)
+    assert result.run_id is not None
+    run = stub_persistence.get_generation_run(result.run_id)
+    assert run is not None
+    assert run.status == GenerationStatus.FAILED
 
 
 def test_generate_data_includes_traceback_in_error() -> None:
