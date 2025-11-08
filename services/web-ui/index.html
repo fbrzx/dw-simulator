@@ -51,6 +51,14 @@
               </div>
 
               <form id="json-form">
+                <label for="json-warehouse-select">Target Warehouse</label>
+                <select id="json-warehouse-select">
+                  <option value="">Default (configured in environment)</option>
+                  <option value="sqlite">SQLite</option>
+                  <option value="redshift">Redshift (PostgreSQL emulator)</option>
+                  <option value="snowflake">Snowflake (LocalStack emulator)</option>
+                </select>
+                <small class="form-hint">Choose which warehouse to store experiment data in. Default uses system configuration priority.</small>
                 <label for="schema-input">Paste experiment JSON schema</label>
                 <textarea id="schema-input" rows="12" required></textarea>
                 <div class="actions">
@@ -61,13 +69,14 @@
               <form id="sql-form" class="hidden">
                 <label for="sql-experiment-name">Experiment name</label>
                 <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
-                <label for="dialect-select">Dialect</label>
+                <label for="dialect-select">SQL Dialect (for parsing)</label>
                 <select id="dialect-select">
                   <option value="redshift">Amazon Redshift</option>
                   <option value="snowflake">Snowflake</option>
                   <option value="ansi">ANSI</option>
                 </select>
-                <label for="warehouse-select">Target Warehouse</label>
+                <small class="form-hint">SQL dialect used to parse your CREATE TABLE statements.</small>
+                <label for="warehouse-select">Target Warehouse (for storage)</label>
                 <select id="warehouse-select">
                   <option value="">Default (configured in environment)</option>
                   <option value="sqlite">SQLite</option>

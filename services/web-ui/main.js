@@ -195,6 +195,12 @@ const createExperimentFromJson = async (event) => {
     return;
   }
 
+  // Add warehouse selection if specified
+  const jsonWarehouseSelect = document.getElementById('json-warehouse-select');
+  if (jsonWarehouseSelect && jsonWarehouseSelect.value) {
+    payload.target_warehouse = jsonWarehouseSelect.value;
+  }
+
   setStatus('Creating experiment...');
   try {
     const response = await fetch(`${API_BASE}/experiments`, {
