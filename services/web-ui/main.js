@@ -90,6 +90,8 @@ const clearWarningBanner = () => {
 
 let activeMode = 'json';
 let warningListCounter = 0;
+let experimentsCache = [];
+const schemaCache = new Map();
 
 const switchMode = (mode) => {
   activeMode = mode;
@@ -129,6 +131,42 @@ const updateQueryTabState = (experiments) => {
   }
 };
 
+const cacheExperimentSchemas = (experiments) => {
+  schemaCache.clear();
+  experiments.forEach((experiment) => {
+    if (!experiment.schema) {
+      return;
+    }
+    try {
+      const parsed = typeof experiment.schema === 'string'
+        ? JSON.parse(experiment.schema)
+        : experiment.schema;
+      schemaCache.set(experiment.name, parsed);
+    } catch (error) {
+      console.warn(`Failed to parse schema for experiment "${experiment.name}"`, error);
+    }
+  });
+};
+
+const getTablesForExperiment = (experimentName) => {
+  const schema = schemaCache.get(experimentName);
+  if (!schema || !Array.isArray(schema.tables)) {
+    return [];
+  }
+  return schema.tables.map((table) => ({
+    name: table.name,
+    columnCount: Array.isArray(table.columns) ? table.columns.length : 0,
+    targetRows: table.target_rows,
+    columns: (table.columns || []).map((column) => ({
+      name: column.name,
+      type: column.data_type ?? column.type ?? 'UNKNOWN',
+      required: column.required ?? true,
+      isUnique: column.is_unique ?? column.isUnique ?? false,
+      foreignKey: column.foreign_key,
+    })),
+  }));
+};
+
 const fetchExperiments = async () => {
   setStatus('Loading experiments…');
   clearWarningBanner();  // Clear warnings when refreshing
@@ -137,6 +175,8 @@ const fetchExperiments = async () => {
     if (!response.ok) throw new Error('Failed to load experiments');
     const data = await response.json();
     const experiments = data.experiments ?? [];
+    experimentsCache = experiments;
+    cacheExperimentSchemas(experiments);
     renderExperiments(experiments);
     populateExperimentSelector(experiments);
     updateQueryTabState(experiments);
@@ -692,14 +732,339 @@ const exportCsvBtn = document.getElementById('export-csv-btn');
 const dialectInfo = document.getElementById('dialect-info');
 const selectedWarehouse = document.getElementById('selected-warehouse');
 const selectedDialect = document.getElementById('selected-dialect');
+const tableSchemaToggle = document.getElementById('table-schema-toggle');
+const tableSchemaDetails = document.getElementById('table-schema-details');
+const tableHelper = document.getElementById('table-helper');
+const tableHelperList = document.getElementById('table-helper-list');
+const tableHelperEmpty = document.getElementById('table-helper-empty');
+const tableHelperCount = document.getElementById('table-helper-count');
+const tableSuggestions = document.getElementById('table-suggestions');
 
 let lastQueryResult = null;
+let currentTableNames = [];
+let visibleTableSuggestions = [];
+let currentSuggestionIndex = -1;
+let suggestionHideTimeoutId = null;
+let schemaViewVisible = false;
+let lastRenderedTableData = [];
 
 // Warehouse to SQL dialect mapping
 const warehouseDialectMap = {
   'sqlite': 'SQLite',
   'redshift': 'PostgreSQL (Redshift-compatible)',
   'snowflake': 'Snowflake SQL'
+};
+
+const hideTableSuggestions = () => {
+  if (!tableSuggestions) return;
+  tableSuggestions.classList.add('hidden');
+  tableSuggestions.innerHTML = '';
+  visibleTableSuggestions = [];
+  currentSuggestionIndex = -1;
+};
+
+const resetTableHelper = (message = 'Select an experiment to see available tables.') => {
+  if (!tableHelper) return;
+  tableHelper.classList.add('hidden');
+  if (tableHelperList) {
+    tableHelperList.innerHTML = '';
+  }
+  if (tableHelperEmpty) {
+    tableHelperEmpty.textContent = message;
+  }
+  if (tableHelperCount) {
+    tableHelperCount.textContent = '';
+  }
+  currentTableNames = [];
+  hideTableSuggestions();
+  lastRenderedTableData = [];
+  schemaViewVisible = false;
+  if (tableSchemaToggle) {
+    tableSchemaToggle.textContent = 'View schema';
+    tableSchemaToggle.setAttribute('aria-pressed', 'false');
+  }
+  if (tableSchemaDetails) {
+    tableSchemaDetails.classList.add('hidden');
+    tableSchemaDetails.innerHTML = '';
+  }
+};
+
+const renderTableHelper = (tables, experimentName) => {
+  if (!tableHelper || !tableHelperList || !tableHelperEmpty || !tableHelperCount) {
+    return;
+  }
+  tableHelper.classList.remove('hidden');
+
+  if (!tables.length) {
+    tableHelperList.innerHTML = '';
+    tableHelperEmpty.textContent = experimentName
+      ? `No tables found for "${experimentName}".`
+      : 'No tables available for this experiment.';
+    tableHelperEmpty.classList.remove('hidden');
+    tableHelperCount.textContent = '';
+    lastRenderedTableData = tables;
+    renderTableSchemaDetails();
+    return;
+  }
+
+  tableHelperEmpty.classList.add('hidden');
+  tableHelperCount.textContent = `${tables.length} ${tables.length === 1 ? 'table' : 'tables'}`;
+
+  const fragment = document.createDocumentFragment();
+  tables.forEach((table) => {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'table-pill';
+    button.dataset.tableName = table.name;
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'table-pill-name';
+    nameEl.textContent = table.name;
+
+    const metaEl = document.createElement('span');
+    metaEl.className = 'table-pill-meta';
+    const columnLabel = `${table.columnCount} column${table.columnCount === 1 ? '' : 's'}`;
+    const rowsLabel = table.targetRows ? ` · ~${table.targetRows} rows` : '';
+    metaEl.textContent = `${columnLabel}${rowsLabel}`;
+
+    button.appendChild(nameEl);
+    button.appendChild(metaEl);
+    li.appendChild(button);
+    fragment.appendChild(li);
+  });
+
+  tableHelperList.innerHTML = '';
+  tableHelperList.appendChild(fragment);
+
+  lastRenderedTableData = tables;
+  renderTableSchemaDetails();
+};
+
+const replaceCurrentTokenWith = (replacement) => {
+  if (!queryInput) return;
+  const selectionStart = queryInput.selectionStart ?? queryInput.value.length;
+  const selectionEnd = queryInput.selectionEnd ?? selectionStart;
+  let tokenStart = selectionStart;
+  let tokenEnd = selectionEnd;
+
+  if (selectionStart === selectionEnd) {
+    const before = queryInput.value.slice(0, selectionStart);
+    const match = before.match(/([a-zA-Z0-9_"]+)$/);
+    if (match) {
+      tokenStart = selectionStart - match[1].length;
+    }
+  }
+
+  const beforeText = queryInput.value.slice(0, tokenStart);
+  const afterText = queryInput.value.slice(tokenEnd);
+  let textToInsert = replacement;
+  if (selectionStart === selectionEnd && tokenStart === selectionStart) {
+    const needsSpace = beforeText && !/\s$/.test(beforeText);
+    if (needsSpace) {
+      textToInsert = ` ${textToInsert}`;
+    }
+  }
+
+  const newValue = `${beforeText}${textToInsert}${afterText}`;
+  queryInput.value = newValue;
+  const newCaret = beforeText.length + textToInsert.length;
+  requestAnimationFrame(() => {
+    queryInput.focus();
+    queryInput.setSelectionRange(newCaret, newCaret);
+  });
+};
+
+const insertTableNameIntoQuery = (tableName) => {
+  replaceCurrentTokenWith(tableName);
+  hideTableSuggestions();
+};
+
+const getCurrentToken = () => {
+  if (!queryInput) return '';
+  const cursor = queryInput.selectionStart ?? 0;
+  const before = queryInput.value.slice(0, cursor);
+  const match = before.match(/([a-zA-Z0-9_"]+)$/);
+  return match ? match[1] : '';
+};
+
+const setSuggestionActive = (index) => {
+  if (!tableSuggestions) return;
+  const buttons = tableSuggestions.querySelectorAll('button');
+  buttons.forEach((button, idx) => {
+    button.classList.toggle('active', idx === index);
+  });
+  currentSuggestionIndex = index;
+};
+
+const showTableSuggestionsForNames = (names) => {
+  if (!tableSuggestions) return;
+  if (!names.length) {
+    hideTableSuggestions();
+    return;
+  }
+  tableSuggestions.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  names.forEach((name, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.tableName = name;
+    button.textContent = name;
+    if (index === 0) {
+      button.classList.add('active');
+    }
+    fragment.appendChild(button);
+  });
+  tableSuggestions.appendChild(fragment);
+  tableSuggestions.classList.remove('hidden');
+  visibleTableSuggestions = names;
+  setSuggestionActive(0);
+};
+
+const updateTableSuggestions = () => {
+  if (!currentTableNames.length) {
+    hideTableSuggestions();
+    return;
+  }
+  const token = getCurrentToken();
+  if (!token) {
+    hideTableSuggestions();
+    return;
+  }
+  const normalized = token.replace(/"/g, '').toLowerCase();
+  if (!normalized) {
+    hideTableSuggestions();
+    return;
+  }
+  const matches = currentTableNames.filter((name) => name.toLowerCase().startsWith(normalized)).slice(0, 6);
+  if (!matches.length) {
+    hideTableSuggestions();
+    return;
+  }
+  showTableSuggestionsForNames(matches);
+};
+
+const showAllTableSuggestions = () => {
+  if (!currentTableNames.length) {
+    hideTableSuggestions();
+    return;
+  }
+  showTableSuggestionsForNames(currentTableNames.slice(0, 6));
+};
+
+const applySuggestionAtIndex = (index) => {
+  if (index < 0 || index >= visibleTableSuggestions.length) {
+    return;
+  }
+  const name = visibleTableSuggestions[index];
+  if (name) {
+    insertTableNameIntoQuery(name);
+  }
+};
+
+const formatForeignKey = (foreignKey) => {
+  if (!foreignKey) return null;
+  if (foreignKey.references_table && foreignKey.references_column) {
+    return `${foreignKey.references_table}.${foreignKey.references_column}`;
+  }
+  return null;
+};
+
+const renderTableSchemaDetails = () => {
+  if (!tableSchemaDetails) return;
+  if (!schemaViewVisible) {
+    tableSchemaDetails.classList.add('hidden');
+    return;
+  }
+
+  if (!lastRenderedTableData.length) {
+    tableSchemaDetails.classList.remove('hidden');
+    tableSchemaDetails.innerHTML = '<p class="table-schema-empty">No schema available.</p>';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  lastRenderedTableData.forEach((table) => {
+    const group = document.createElement('div');
+    group.className = 'table-schema-group';
+
+    const heading = document.createElement('div');
+    heading.className = 'table-schema-group-heading';
+    const headingName = document.createElement('span');
+    headingName.textContent = table.name;
+    heading.appendChild(headingName);
+
+    const headingMeta = document.createElement('small');
+    headingMeta.textContent = `${table.columnCount} columns`;
+    heading.appendChild(headingMeta);
+
+    const columnList = document.createElement('ul');
+    columnList.className = 'table-column-list';
+    (table.columns || []).forEach((column) => {
+      const li = document.createElement('li');
+
+      const columnName = document.createElement('span');
+      columnName.className = 'table-column-name';
+      columnName.textContent = column.name;
+
+      const columnMeta = document.createElement('span');
+      columnMeta.className = 'table-column-meta';
+      const metaParts = [column.type];
+      if (column.isUnique) {
+        metaParts.push('unique');
+      }
+      if (!column.required) {
+        metaParts.push('nullable');
+      }
+      const fkLabel = formatForeignKey(column.foreignKey);
+      if (fkLabel) {
+        metaParts.push(`FK→${fkLabel}`);
+      }
+      columnMeta.textContent = metaParts.join(' · ');
+
+      li.appendChild(columnName);
+      li.appendChild(columnMeta);
+      columnList.appendChild(li);
+    });
+
+    group.appendChild(heading);
+    group.appendChild(columnList);
+    fragment.appendChild(group);
+  });
+
+  tableSchemaDetails.innerHTML = '';
+  tableSchemaDetails.appendChild(fragment);
+  tableSchemaDetails.classList.remove('hidden');
+};
+
+const toggleSchemaView = () => {
+  schemaViewVisible = !schemaViewVisible;
+  if (tableSchemaToggle) {
+    tableSchemaToggle.textContent = schemaViewVisible ? 'Hide schema' : 'View schema';
+    tableSchemaToggle.setAttribute('aria-pressed', schemaViewVisible.toString());
+  }
+  renderTableSchemaDetails();
+};
+
+const handleExperimentSelectionChange = () => {
+  const selectedOption = experimentSelect.options[experimentSelect.selectedIndex];
+  if (!selectedOption || !selectedOption.value) {
+    dialectInfo.classList.add('hidden');
+    resetTableHelper();
+    return;
+  }
+
+  const warehouse = selectedOption.dataset.warehouse || 'sqlite';
+  const dialect = warehouseDialectMap[warehouse] || warehouse.toUpperCase();
+  selectedWarehouse.textContent = warehouse.toUpperCase();
+  selectedDialect.textContent = dialect;
+  dialectInfo.classList.remove('hidden');
+
+  const experimentName = selectedOption.value;
+  const tables = getTablesForExperiment(experimentName);
+  currentTableNames = tables.map((table) => table.name);
+  renderTableHelper(tables, experimentName);
+  hideTableSuggestions();
 };
 
 const populateExperimentSelector = (experiments) => {
@@ -715,6 +1080,10 @@ const populateExperimentSelector = (experiments) => {
     option.textContent = `${experiment.name}${warehouseLabel}`;
     experimentSelect.appendChild(option);
   });
+
+  experimentSelect.value = '';
+  resetTableHelper();
+  dialectInfo.classList.add('hidden');
 };
 
 const setQueryStatus = (message, type = 'info') => {
@@ -830,6 +1199,7 @@ const clearQuery = () => {
   queryResultsContainer.classList.add('hidden');
   lastQueryResult = null;
   clearQueryStatus();
+  hideTableSuggestions();
 };
 
 const saveQuery = () => {
@@ -913,20 +1283,86 @@ const exportCsv = async () => {
   }
 };
 
-// Event listener for experiment selection to show dialect info
-experimentSelect.addEventListener('change', () => {
-  const selectedOption = experimentSelect.options[experimentSelect.selectedIndex];
-  if (selectedOption && selectedOption.value) {
-    const warehouse = selectedOption.dataset.warehouse || 'sqlite';
-    const dialect = warehouseDialectMap[warehouse] || warehouse.toUpperCase();
+if (tableHelperList) {
+  tableHelperList.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-table-name]');
+    if (!button) return;
+    insertTableNameIntoQuery(button.dataset.tableName);
+  });
+}
 
-    selectedWarehouse.textContent = warehouse.toUpperCase();
-    selectedDialect.textContent = dialect;
-    dialectInfo.classList.remove('hidden');
-  } else {
-    dialectInfo.classList.add('hidden');
-  }
-});
+if (tableSchemaToggle) {
+  tableSchemaToggle.addEventListener('click', toggleSchemaView);
+}
+
+if (tableSuggestions) {
+  tableSuggestions.addEventListener('mousedown', (event) => {
+    const button = event.target.closest('button[data-table-name]');
+    if (!button) return;
+    event.preventDefault();
+    insertTableNameIntoQuery(button.dataset.tableName);
+  });
+}
+
+if (queryInput) {
+  queryInput.addEventListener('input', () => {
+    updateTableSuggestions();
+  });
+
+  queryInput.addEventListener('keydown', (event) => {
+    if (event.ctrlKey && event.key === ' ') {
+      event.preventDefault();
+      showAllTableSuggestions();
+      return;
+    }
+
+    if (!tableSuggestions || tableSuggestions.classList.contains('hidden')) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!visibleTableSuggestions.length) return;
+      const nextIndex = (currentSuggestionIndex + 1) % visibleTableSuggestions.length;
+      setSuggestionActive(nextIndex);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!visibleTableSuggestions.length) return;
+      const prevIndex = (currentSuggestionIndex - 1 + visibleTableSuggestions.length) % visibleTableSuggestions.length;
+      setSuggestionActive(prevIndex);
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+      if (visibleTableSuggestions.length) {
+        event.preventDefault();
+        const targetIndex = currentSuggestionIndex === -1 ? 0 : currentSuggestionIndex;
+        applySuggestionAtIndex(targetIndex);
+      }
+    } else if (event.key === 'Escape') {
+      hideTableSuggestions();
+    }
+  });
+
+  queryInput.addEventListener('blur', () => {
+    suggestionHideTimeoutId = window.setTimeout(hideTableSuggestions, 150);
+  });
+
+  queryInput.addEventListener('focus', () => {
+    if (suggestionHideTimeoutId) {
+      clearTimeout(suggestionHideTimeoutId);
+      suggestionHideTimeoutId = null;
+    }
+  });
+}
+
+if (tableSuggestions) {
+  document.addEventListener('click', (event) => {
+    if (tableSuggestions.classList.contains('hidden')) return;
+    if (event.target === queryInput) return;
+    if (tableSuggestions.contains(event.target)) return;
+    hideTableSuggestions();
+  });
+}
+
+experimentSelect.addEventListener('change', handleExperimentSelectionChange);
 
 // Event listeners for query interface
 queryForm.addEventListener('submit', executeQuery);

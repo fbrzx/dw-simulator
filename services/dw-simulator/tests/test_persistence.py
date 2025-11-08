@@ -460,6 +460,58 @@ def test_execute_query_returns_results(tmp_path: Path) -> None:
     assert "amount" in result.columns
 
 
+def test_execute_query_rewrites_logical_table_names(tmp_path: Path) -> None:
+    """Logical table names should be transparently rewritten to physical names."""
+    from sqlalchemy import text
+
+    persistence = create_persistence(tmp_path)
+    schema = ExperimentSchema(
+        name="RewriteTest",
+        description="",
+        tables=[
+            TableSchema(
+                name="customers",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=100),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=10,
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="customer_id", data_type="INT"),
+                    ColumnSchema(name="amount", data_type="FLOAT"),
+                ],
+            ),
+        ],
+    )
+    persistence.create_experiment(schema)
+
+    customers_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('customers')}"
+    orders_table = f"{normalize_identifier(schema.name)}__{normalize_identifier('orders')}"
+    with persistence.engine.begin() as conn:
+        conn.execute(text(f'INSERT INTO "{customers_table}" (id, name) VALUES (1, \'Alice\'), (2, \'Bob\')'))
+        conn.execute(text(f'INSERT INTO "{orders_table}" (order_id, customer_id, amount) VALUES (200, 1, 99.0), (201, 2, 45.5)'))
+
+    # Refer to tables using logical/uppercase names
+    result = persistence.execute_query("SELECT name FROM CUSTOMERS ORDER BY name", experiment_name=schema.name)
+    assert result.row_count == 2
+    assert [row[0] for row in result.rows] == ["Alice", "Bob"]
+
+    join_sql = """
+        SELECT c.name, o.amount
+        FROM CUSTOMERS c
+        JOIN ORDERS o ON c.id = o.customer_id
+        ORDER BY o.amount DESC
+    """
+    join_result = persistence.execute_query(join_sql, experiment_name=schema.name)
+    assert join_result.row_count == 2
+    assert join_result.columns == ["name", "amount"]
+
+
 def test_execute_query_handles_invalid_sql(tmp_path: Path) -> None:
     """Test that execute_query provides clear error messages for invalid SQL (US 3.1 AC 2)."""
     persistence = create_persistence(tmp_path)

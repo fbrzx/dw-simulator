@@ -148,13 +148,43 @@
                   <strong>SQL Dialect:</strong> <span id="selected-dialect">-</span>
                 </div>
 
+                <div id="table-helper" class="table-helper hidden" aria-live="polite">
+                  <div class="table-helper-header">
+                    <div>
+                      <strong>Available Tables</strong>
+                      <span id="table-helper-count"></span>
+                    </div>
+                    <span class="table-helper-hint">Click a table to insert it into the query.</span>
+                    <button
+                      id="table-schema-toggle"
+                      type="button"
+                      class="table-schema-toggle"
+                      aria-pressed="false"
+                    >
+                      View schema
+                    </button>
+                  </div>
+                  <p id="table-helper-empty" class="table-helper-empty">Select an experiment to see available tables.</p>
+                  <ul id="table-helper-list" class="table-helper-list"></ul>
+                  <div id="table-schema-details" class="table-schema-details hidden"></div>
+                </div>
+
                 <label for="query-input">SQL Query</label>
-                <textarea
-                  id="query-input"
-                  rows="8"
-                  placeholder="SELECT * FROM customers LIMIT 10;"
-                  required
-                ></textarea>
+                <div class="query-input-wrapper">
+                  <textarea
+                    id="query-input"
+                    rows="8"
+                    placeholder="SELECT * FROM customers LIMIT 10;"
+                    required
+                  ></textarea>
+                  <div
+                    id="table-suggestions"
+                    class="table-suggestions hidden"
+                    role="listbox"
+                    aria-label="Table name suggestions"
+                  ></div>
+                </div>
+                <small class="query-helper-note">Press Ctrl + Space or start typing a table name to auto-complete.</small>
 
                 <div class="query-actions">
                   <button type="submit" class="primary">Execute Query</button>

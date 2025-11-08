@@ -39,6 +39,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from .config import get_target_db_url, get_redshift_url, get_snowflake_url
 from .schema import ColumnSchema, DataType, ExperimentSchema, WarehouseType
 from .s3_client import upload_parquet_files_to_s3, S3UploadError
+from .query_rewriter import rewrite_query_for_experiment, QueryRewriteError
 
 import pyarrow.parquet as pq
 
@@ -660,10 +661,9 @@ class ExperimentPersistence:
         """
         Execute a SQL query against the warehouse database (Redshift/PostgreSQL/Snowflake).
 
-        If experiment_name is provided, creates temporary views that map simple table names
-        to the physical experiment__table names, allowing queries like "SELECT * FROM customers"
-        instead of "SELECT * FROM experiment__customers". Also routes to the experiment's
-        target warehouse.
+        If experiment_name is provided, rewrites logical table names (e.g., "customers")
+        to the physical experiment-prefixed tables (e.g., "experiment__customers")
+        before executing the query. Also routes to the experiment's target warehouse.
 
         Raises QueryExecutionError if the query fails.
         """
@@ -674,7 +674,7 @@ class ExperimentPersistence:
             warehouse_engine = self.warehouse_engine
 
         try:
-            # If experiment is specified, get table list from metadata DB first
+            rewritten_sql = sql
             if experiment_name:
                 with self.engine.connect() as metadata_conn:
                     table_rows = metadata_conn.execute(
@@ -683,19 +683,24 @@ class ExperimentPersistence:
                         )
                     ).all()
 
+                table_mapping = {
+                    row.table_name: self._physical_table_name(experiment_name, row.table_name)
+                    for row in table_rows
+                }
+
+                try:
+                    rewritten_sql = rewrite_query_for_experiment(
+                        sql=sql,
+                        experiment_name=experiment_name,
+                        table_mapping=table_mapping,
+                    )
+                except QueryRewriteError as exc:
+                    raise QueryExecutionError(str(exc)) from exc
+
             # Execute query against warehouse database (where actual data lives)
             with warehouse_engine.connect() as conn:
-                # If experiment is specified, create temporary views for easier querying
-                if experiment_name:
-                    # Create temporary views for each table
-                    for row in table_rows:
-                        logical_name = row.table_name
-                        physical_name = self._physical_table_name(experiment_name, logical_name)
-                        # Create or replace a temporary view with the simple table name
-                        conn.execute(text(f'CREATE OR REPLACE TEMP VIEW "{logical_name}" AS SELECT * FROM "{physical_name}"'))
-
                 # Execute the user's query
-                result = conn.execute(text(sql))
+                result = conn.execute(text(rewritten_sql))
 
                 # Get column names from keys()
                 columns = list(result.keys())
