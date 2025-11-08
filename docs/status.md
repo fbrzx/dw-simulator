@@ -196,7 +196,7 @@ The dual-database architecture has been implemented and tested. The system now s
 
 ### US 6.1 – Advanced data generation with statistical distributions (IN PROGRESS)
 - **Step 1 (✅ COMPLETE):** Extended schema model with `DistributionConfig` support on `ColumnSchema`, added validation for numeric columns and required parameters, updated `docs/tech-spec.md`, and introduced new schema unit tests.
-- **Step 2:** Implement generator support for new distributions (normal, exponential, beta) with deterministic seeding and fallbacks.
+- **Step 2 (✅ COMPLETE):** Implemented generator support for normal, exponential, and beta distributions with deterministic seeding driven by the existing RNG. Added clamped range handling for all numeric columns, beta scaling into configured min/max windows, and integer rounding consistent with schema constraints. Introduced focused unit tests covering each distribution to guarantee reproducible output sequences and boundary enforcement.
 - **Step 3:** Add CLI/API/UI handling so distribution options can be supplied via JSON schema and surfaced in responses.
 - **Step 4:** Expand test coverage (unit + integration) to verify distribution enforcement and CLI/API behavior.
 
