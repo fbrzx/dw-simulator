@@ -12,25 +12,19 @@ under `./services` and is orchestrated via `docker-compose.yml`.
 - `services/data-loader` – ⚠️ **Not yet implemented.** Planned batch/ELT worker that will move
   staged Parquet data into the local Redshift/Snowflake emulators.
 
-### ⚠️ Current Implementation Note
+### Warehouse routing
 
-**Current State:**
-- All experiment data is currently loaded into **SQLite** (not Redshift/Snowflake emulators)
-- SQL queries run against SQLite using standard ANSI SQL
-- The Redshift (PostgreSQL) and Snowflake (LocalStack) emulators are configured in docker-compose.yml but not yet integrated
+**Current state:**
+- Experiment metadata (schemas, tables, generation runs) always lives in SQLite under `data/sqlite/dw_simulator.db`.
+- Physical tables are created inside the selected warehouse. By default the simulator prefers `DW_SIMULATOR_REDSHIFT_URL`, then `DW_SIMULATOR_SNOWFLAKE_URL`, and finally falls back to SQLite.
+- CLI, API, and Web UI all accept a `target_warehouse` switch so an experiment can be pinned to `sqlite`, `redshift`, or `snowflake`.
 
-**Why this matters:**
-- ✅ Current implementation: Fast prototyping, full SQL support, works for basic testing
-- ❌ Missing: Cannot test Redshift-specific features (DISTKEY, SORTKEY, SUPER type)
-- ❌ Missing: Cannot test Snowflake-specific features (VARIANT, semi-structured data)
-- ❌ Missing: Query performance characteristics differ from actual warehouses
+**Implementation details:**
+- Generated Parquet files are written to `data/generated/<experiment>/<timestamp>/` and automatically loaded into the target warehouse as soon as generation completes.
+- Redshift/PostgreSQL runs upload the Parquet batches to LocalStack S3 for parity and then bulk-insert via SQLAlchemy (the emulator does not support `COPY FROM S3`). Snowflake runs attempt a `COPY INTO` from the staged files and fall back to direct inserts if the LocalStack build is missing a feature.
 
 **Roadmap:**
-- See **US 5.2** in `docs/status.md` for the implementation plan
-- Goal: Enable dual-database architecture (SQLite for metadata, PostgreSQL/Snowflake for data)
-- Estimated timeline: 5-7 days of development work
-
-If testing warehouse-specific SQL features is critical for your use case, please prioritize US 5.2 implementation.
+- See `docs/status.md` for the active backlog (performance tuning, richer Redshift/Snowflake data types, optional asynchronous loaders). If you need a capability that is still listed in the backlog, please prioritize that user story.
 
 ## Developing the Python service
 
@@ -75,9 +69,7 @@ dw-sim experiment import-sql schema.sql --name my_experiment --dialect redshift
 dw-sim experiment generate customers_experiment --rows customers=50000 --seed 42
 ```
 
-The command validates the schema, persists metadata to SQLite (or the configured
-warehouse URL), and creates the physical tables. Errors are surfaced with the
-exact validation message(s).
+The command validates the schema, persists metadata to SQLite, and creates the physical tables inside the selected warehouse (sqlite/redshift/snowflake). Errors are surfaced with the exact validation message(s).
 
 ### Composite primary key support
 
@@ -174,6 +166,103 @@ curl -X POST http://localhost:8000/api/experiments/my_experiment/reset
 - Reset is **blocked** if a generation run is currently active for the experiment
 - The experiment schema and metadata are preserved; only table data is removed
 - After reset, you can regenerate data normally
+
+## Foreign Key Relationships
+
+The simulator supports foreign key relationships between tables, ensuring generated data maintains referential integrity. When you define foreign keys, child table values automatically reference valid primary keys from parent tables.
+
+### Defining Foreign Keys in JSON
+
+Add a `foreign_key` field to any column to establish a relationship:
+
+```json
+{
+  "name": "ecommerce_experiment",
+  "tables": [
+    {
+      "name": "customers",
+      "target_rows": 1000,
+      "columns": [
+        {"name": "customer_id", "data_type": "INT", "is_unique": true},
+        {"name": "email", "data_type": "VARCHAR", "varchar_length": 100}
+      ]
+    },
+    {
+      "name": "orders",
+      "target_rows": 5000,
+      "columns": [
+        {"name": "order_id", "data_type": "INT", "is_unique": true},
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "foreign_key": {
+            "references_table": "customers",
+            "references_column": "customer_id"
+          }
+        },
+        {"name": "order_date", "data_type": "DATE"}
+      ]
+    }
+  ]
+}
+```
+
+### Foreign Key Features
+
+- **Automatic referential integrity**: Generated FK values are guaranteed to reference existing parent table values
+- **Nullable foreign keys**: Add `"nullable": true` to the foreign_key config to allow NULL values (~10% rate)
+- **Multi-level chains**: Define FK chains across multiple tables (e.g., regions → stores → sales)
+- **SQL import detection**: The SQL parser automatically detects both inline `REFERENCES` and table-level `FOREIGN KEY` constraints
+- **Topological ordering**: Tables are generated in dependency order (parents before children)
+- **Circular dependency detection**: The system validates FK graphs and detects circular dependencies
+
+### SQL Import with Foreign Keys
+
+Foreign keys are automatically detected when importing SQL DDL:
+
+```sql
+-- Inline REFERENCES syntax
+CREATE TABLE orders (
+  order_id BIGINT PRIMARY KEY,
+  customer_id BIGINT REFERENCES customers(customer_id),
+  order_date DATE
+);
+
+-- Table-level FOREIGN KEY syntax
+CREATE TABLE order_items (
+  item_id BIGINT PRIMARY KEY,
+  order_id BIGINT,
+  product_id BIGINT,
+  FOREIGN KEY (order_id) REFERENCES orders(order_id)
+);
+```
+
+Import via CLI:
+```bash
+dw-sim experiment import-sql schema.sql --name fk_experiment --dialect redshift
+dw-sim experiment generate fk_experiment
+```
+
+The generated data will maintain referential integrity across all tables.
+
+### Nullable Foreign Keys
+
+To allow NULL values in foreign key columns, add the `nullable` field:
+
+```json
+{
+  "name": "customer_id",
+  "data_type": "INT",
+  "required": false,
+  "foreign_key": {
+    "references_table": "customers",
+    "references_column": "customer_id",
+    "nullable": true
+  }
+}
+```
+
+This injects approximately 10% NULL values, useful for optional relationships and breaking circular dependencies.
 
 ## Data Generation Rules
 

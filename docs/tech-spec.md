@@ -10,7 +10,7 @@ This architecture proposes a comprehensive **Local-First Data Simulation Environ
 | :--- | :--- | :--- |
 | Snowflake (Data Warehouse) | LocalStack Snowflake Emulator (Docker) | Local-First, Service Abstraction |
 | Amazon Redshift (Data Warehouse) | Containerized PostgreSQL with Redshift Mocking Layer | Local-First, Data Architecture |
-| Synthetic Data Generation | Python/SDV Utility (Containerized) | 12-Factor App (Build/Release/Run) |
+| Synthetic Data Generation | Python/Typer service (Faker + PyArrow + Pydantic) | 12-Factor App (Build/Release/Run) |
 | Amazon S3 (Data Lake/Staging) | LocalStack S3 Emulator (Docker) | Service Abstraction, Local-First |
 
 ---
@@ -20,7 +20,7 @@ This architecture proposes a comprehensive **Local-First Data Simulation Environ
 | ADR ID | Status | Context | Decision | Consequences |
 | :--- | :--- | :--- | :--- | :--- |
 | **ADR-001** | Decided | A local solution is required to emulate both Redshift and Snowflake data warehouses for local development and testing, without using costly cloud resources. | **Adopt LocalStack (for Snowflake) and a Postgres-based mock (for Redshift).** LocalStack offers a dedicated, high-fidelity Snowflake emulator running in Docker. Redshift, being PostgreSQL-compatible, will use a standard containerized PostgreSQL instance combined with a mocking library to handle Redshift-specific SQL. | This approach provides the highest feature parity while adhering to our **Local-First** and **Data Architecture** mandates (favoring containerized PostgreSQL). A LocalStack license (for the Snowflake/Redshift advanced features) may be required. |
-| **ADR-002** | Decided | We need a robust, schema-driven, and open-source solution for generating large volumes of synthetic data that respects statistical properties. | **Adopt Synthetic Data Vault (SDV) Python Library.** SDV is open-source, handles relational integrity (multi-table), and preserves the statistical characteristics of the input schema. The generation utility will be packaged as a stateless Docker container. | SDV requires a schema definition phase (either from sample data or manually defined Pydantic models) before generation. The output will be Parquet/CSV files staged in the local S3 emulator (LocalStack S3). |
+| **ADR-002** | Decided | We need a robust, schema-driven, and open-source solution for generating large volumes of synthetic data that respects statistical properties. | **Adopt a lightweight Faker/Pydantic/PyArrow engine inside the Python service and defer SDV.** The custom generator keeps installs small, runs deterministically inside the Typer/FastAPI service, and already satisfies uniqueness, range, distribution, and foreign-key requirements. SDV can be revisited once higher-fidelity statistical modeling is required. | Advanced SDV features (model training, learned correlations) remain out-of-scope for now, so some complex statistical behaviors require manual configuration. The upside is faster local builds, zero extra services, and complete control over constraint enforcement in pure Python. |
 | **ADR-003** | Decided | We need a portable and efficient file format for moving data from the generation utility to the data warehouses. | **Standardize on Parquet format for data transfer.** Parquet is a column-oriented format, which is the most efficient and standard way to load data into cloud data warehouses like Redshift and Snowflake. | The synthetic data generation utility must be configured to output compressed Parquet files. LocalStack S3 will be the staging area, simulating a real-world S3 staging bucket. |
 
 ---
@@ -79,19 +79,20 @@ With experiment authoring/deletion complete, the next increment introduces an op
    * Generation jobs run under the same container as the CLI/API, ensuring a single codepath whether invoked via `dw-sim experiment generate`, REST, or future scheduler.
 
 2. **Generation Engine (Python module `dw_simulator.generator`)**
-   * Uses Faker for discrete column rules (varchar/email/names) and NumPy/Pandas utilities for numeric/date distributions; SDV integration is deferred until richer statistical requirements arrive.
+   * Uses Faker for discrete column rules (varchar/email/names) plus deterministic helpers built on `random` and PyArrow for numeric/date distributions; SDV integration remains deferred until richer statistical requirements arrive.
    * Column schemas optionally include a `distribution` block describing statistical distributions (`normal`, `exponential`, `beta`) with required parameters validated at the schema layer.
-   * Each table is processed in batches (default 10k rows) to keep memory bounded. The generator yields Pandas DataFrames that are immediately written to compressed Parquet files in `/tmp/dw-sim/<experiment>/<table>/<batch>.parquet`.
+   * Each table is processed in batches (default 10k rows) to keep memory bounded. The generator builds Arrow tables directly and writes compressed Parquet files to `<DATA_ROOT>/generated/<experiment>/<table>/<batch>.parquet`.
    * Constraints/enforcements:
      * `is_unique`: tracked via incremental sets to guarantee no duplicates even across batches.
      * `required=False`: introduces NULLs at a configurable percentage (default 0%).
      * `date_start/date_end`, `min_value/max_value`, and `varchar_length` are enforced before serialization.
-   * After each table completes, the parquet files are uploaded to LocalStack S3 (`DW_SIMULATOR_STAGE_BUCKET`) under `s3://.../experiments/<experiment>/<table>/batch-*.parquet`.
+     * Foreign keys: parent tables are generated first via a topological sort and child values are sampled from cached parent keys, with nullable relationships injecting ~10% NULLs by default.
+   * After each table completes, the generator records the set of unique column values needed for downstream FK sampling; S3 uploads happen later during the load phase rather than during generation.
 
 3. **Orchestration Flow**
    1. Service receives generate request → validates experiment exists + not currently running (simple status flag in SQLite).
    2. Generator produces staged Parquet files while emitting progress events (table-level counts) that are appended to a `generation_runs` table (metadata store).
-   3. Once staging completes, the persistence layer optionally issues `COPY` commands to the local Redshift mock (future step) or simply records the staged object keys so downstream jobs (data-loader service) can ingest them.
+   3. Once staging completes, the service immediately loads the Parquet batches into the experiment's target warehouse by calling `ExperimentPersistence.load_generation_run()`. This method uploads the files to LocalStack S3 when Redshift/Snowflake warehouses are used and either issues a Snowflake `COPY INTO` or falls back to bulk inserts (PostgreSQL and SQLite).
 
 4. **API/CLI/UI Surface**
    * CLI: `dw-sim experiment generate <name> [--rows customers=50000] [--seed 123]`.
@@ -103,7 +104,7 @@ With experiment authoring/deletion complete, the next increment introduces an op
    * Errors (e.g., missing Faker provider, disk issues) are captured and returned to the caller with actionable context; metadata tables store `status=FAILED` plus traceback snippet.
    * A future enhancement will stream stdout to the UI via Server-Sent Events, but initial implementation relies on polling run status.
 
-This design ensures feature parity across CLI/API/UI, keeps generation local-first (no external services), and lays the groundwork for integrating the data-loader service in subsequent stories.
+This design ensures feature parity across CLI/API/UI and keeps the full pipeline local-first (no external services). A dedicated, out-of-process data-loader service remains optional future work for asynchronous or long-running warehouse loads.
 
 #### Upcoming: SQL-Driven Experiment Import (Redshift & Snowflake)
 
@@ -341,64 +342,38 @@ This schema ensures:
 
 | Component | Type | Core Capability | Dependency (Base Image) | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **`synthetic-data-generator`** | Utility/Job | Generates schema-compliant synthetic data (Parquet files). | Python (using SDV/Faker/Pydantic) | ✅ **Implemented** |
-| **`local-snowflake-emulator`** | Service (Emulator) | Simulates Snowflake's SQL, connectivity, and data loading features. | LocalStack (with Snowflake feature enabled) | ⚠️ **Running but Unused** |
-| **`local-redshift-mock`** | Service (Mock DW) | Provides a PostgreSQL endpoint with Redshift-specific SQL mocking capabilities. | `postgres:15-alpine` (with Redshift mock extensions) | ⚠️ **Running but Unused** |
-| **`local-s3-staging`** | Service (Emulator) | Acts as the local data staging area (e.g., for Snowpipe/Redshift `COPY`). | LocalStack (S3 feature) | ⚠️ **Running but Unused** |
-| **`data-loader-utility`** | Utility/Job | Containerized Python/dbt job to execute Snowpipe/COPY commands to load data from local S3 to the local DWs. | Python/Data Client SDKs | 🔴 **Not Implemented** |
+| **`synthetic-data-generator`** | Utility/Job | Generates schema-compliant synthetic data (Parquet files) and loads it into the selected warehouse. | Python (Typer/FastAPI/Faker/PyArrow) | ✅ **Implemented** |
+| **`local-snowflake-emulator`** | Service (Emulator) | Simulates Snowflake's SQL, connectivity, and COPY INTO behavior. | LocalStack (with Snowflake feature enabled) | ✅ **Integrated (optional)** |
+| **`local-redshift-mock`** | Service (Mock DW) | Provides a PostgreSQL endpoint that stands in for Redshift. | `postgres:15-alpine` | ✅ **Integrated (default)** |
+| **`local-s3-staging`** | Service (Emulator) | Acts as the local data staging area for Parquet uploads during warehouse loads. | LocalStack (S3 feature) | ✅ **Integrated** |
+| **`data-loader-utility`** | Utility/Job | Future container to run asynchronous COPY/Snowpipe jobs if we ever decouple loading from generation. | Python/Data Client SDKs | 🟡 **Deferred (handled inside synthetic-data-generator for now)** |
 
-**Current Implementation Note:**
-The current system loads all data into **SQLite** using direct SQLAlchemy inserts from Parquet files. The Redshift/Snowflake emulators and S3 staging are configured in docker-compose.yml but not yet integrated into the data loading pipeline. This is tracked as **US 5.2** in the implementation roadmap.
+#### Warehouse loading status (US 5.2 – COMPLETE)
 
-#### NEW: Data Loader Service Implementation Roadmap (US 5.2)
+The dual-database architecture promised in US 5.2 now ships inside the main Python service:
 
-To achieve the core project goal of querying against actual warehouse emulators, the following implementation is required:
+- **Metadata vs. warehouse engines:** `ExperimentPersistence` keeps schemas, experiment tables, and generation run history in SQLite while creating/loading physical tables in the configured warehouse engine. Environment priority is Redshift (PostgreSQL) → Snowflake (LocalStack) → SQLite.
+- **Automatic loading:** Every successful generation run immediately calls `load_generation_run()`, which reads the Parquet batches from `<DATA_ROOT>/generated/...`, uploads them to LocalStack S3 for parity, and performs the warehouse load. PostgreSQL/Redshift uses fast bulk inserts (the emulator cannot execute `COPY FROM S3`). Snowflake attempts a `COPY INTO ... FILE_FORMAT = (TYPE = PARQUET)` and falls back to inserts when the emulator lacks a feature.
+- **Query routing:** `execute_query()` routes to the correct warehouse connection per experiment and, when an experiment name is supplied, creates temporary views so users can query tables without the `<experiment>__` prefix.
+- **Per-experiment selection:** CLI, API, and Web UI accept a `target_warehouse` field so projects can mix SQLite, Redshift, and Snowflake experiments inside the same environment. Metadata responses include the resolved warehouse type for observability.
 
-**Phase 1: Dual-Database Architecture**
-- **Metadata Database (SQLite):** Continue using SQLite for experiment metadata, schemas, and generation run tracking
-- **Data Warehouse (PostgreSQL/Redshift):** Load generated data into the PostgreSQL-based Redshift emulator
-- **Connection Management:** Implement `ExperimentPersistence` with two database connections:
-  - `metadata_engine` → SQLite (experiments, experiment_tables, generation_runs)
-  - `warehouse_engine` → PostgreSQL (actual data tables)
-
-**Phase 2: S3-Based Loading Pipeline**
-1. **Upload to S3:** After generation, upload Parquet files to LocalStack S3 (`s3://local/dw-simulator/staging/<experiment>/<table>/`)
-2. **Execute COPY Command:** Use PostgreSQL `COPY FROM PROGRAM` or S3-compatible extensions to load from staged files
-3. **Metadata Tracking:** Record S3 URIs in generation_runs table for reproducibility
-
-**Phase 3: Query Routing**
-- Modify `execute_query()` to run against `warehouse_engine` instead of metadata engine
-- Support Redshift-specific SQL syntax (DISTKEY, SORTKEY, window functions)
-- Add connection pooling for query performance
-
-**Phase 4: Multi-Warehouse Support (Future)**
-- Add `target_warehouse` field to ExperimentSchema (sqlite/redshift/snowflake)
-- Implement warehouse-specific adapters (RedshiftAdapter, SnowflakeAdapter)
-- Allow per-experiment warehouse selection in CLI/API/UI
-
-**Benefits:**
-- ✅ Test Redshift-specific SQL features (DISTKEY, SORTKEY, SUPER data type)
-- ✅ Validate query performance characteristics similar to production
-- ✅ Enable Snowflake-specific features (VARIANT, semi-structured data)
-- ✅ Support multi-warehouse testing workflows
-
-**Technical Considerations:**
-- LocalStack Snowflake emulator has limited feature support (may require fallback to PostgreSQL for advanced features)
-- PostgreSQL COPY commands require CSV format or custom extensions for Parquet (may need conversion step)
-- Connection management complexity increases (need robust error handling for multiple databases)
+**Remaining limitations / future enhancements:**
+- True Redshift `COPY FROM S3` syntax still requires a real Redshift cluster; the Postgres emulator uses inserts but still stages to S3 for eventual parity.
+- Snowflake VARIANT/OBJECT/ARRAY data types are not yet modeled in the schema.
+- A dedicated `data-loader` service is still optional backlog work for asynchronous loads, retries, or cross-account pipelines—today the `synthetic-data-generator` handles loading inline.
 
 #### B. Inter-Service Communication
 
 | Communication Type | Source | Target | Protocol/Method | Justification |
 | :--- | :--- | :--- | :--- | :--- |
-| **Asynchronous** | `synthetic-data-generator` | `local-s3-staging` | **File Staging (Parquet)** | Decouples data generation from data warehouse loading. Standard cloud pattern. |
-| **Synchronous** | `data-loader-utility` | `local-snowflake-emulator` / `local-redshift-mock` | **SQL/JDBC/ODBC** | Direct client-to-DB connection for query execution and data loading commands. |
-| **Synchronous** | `data-loader-utility` | `local-s3-staging` | **AWS SDK/LocalStack API** | For issuing commands like Snowpipe auto-ingestion or Redshift `COPY` from the S3 endpoint. |
+| **Asynchronous** | `synthetic-data-generator` | `local-s3-staging` | **File staging (Parquet uploads via boto3)** | Provides the same staging layout a real Snowflake/Redshift loader would expect and keeps artifacts available for replays or manual inspection. |
+| **Synchronous** | `synthetic-data-generator` | `local-redshift-mock` / `local-snowflake-emulator` | **SQLAlchemy (PostgreSQL + Snowflake drivers)** | Inline loading and querying reuse the exact warehouse connection that the CLI/API already ship with, minimizing moving parts while still exercising real SQL engines. |
+| **Future Synchronous (optional)** | `data-loader-utility` | `local-s3-staging` | **AWS SDK / Snowpipe API** | Placeholder for backlog work if we ever spin off a dedicated loader for retries, scheduling, or remote warehouse targets. |
 
 #### C. Technology Stack
 
 *   **Languages & Frameworks:** Python (for the synthetic generation and loading utilities), shell scripting (for setup and orchestration).
-*   **Data Generation:** **SDV (Synthetic Data Vault)** and/or **Pydantic** for strict schema definition.
+*   **Data Generation:** Custom Faker/Pydantic/PyArrow engine that enforces schema constraints directly in Python.
 *   **Emulators/Mocks:** **LocalStack** (for Snowflake and S3 emulation), **PostgreSQL (Docker)** with a Redshift-mocking layer (e.g., `docker-pgredshift` or a custom extension) for Redshift.
 *   **Orchestration:** **Docker Compose** (to define the Local-First stack).
 
@@ -422,7 +397,7 @@ The core strategy is to ensure application code uses standard, vendor-neutral dr
 *   **Portability/Vendor Lock-in Mitigation:**
     *   Avoid using highly vendor-specific functions or stored procedures (e.g., Snowflake Streams/Tasks) unless they are specifically being tested and the test case is isolated.
     *   Use a tool like **`dbt`** (Data Build Tool) to define data transformation models. `dbt` is SQL-centric and can be configured to target both Snowflake and Redshift, abstracting much of the difference in SQL dialects and schema management.
-    *   The synthetic data schema will be defined using **Pydantic/SDV schema definitions**, which are language-agnostic and ensure a consistent structure regardless of the target DW.
+    *   The synthetic data schema is defined using **Pydantic** models, which keeps the format language-agnostic while still allowing us to layer in Faker/distribution metadata. SDV-backed models remain a future enhancement if full statistical modeling becomes necessary.
 
 #### C. API Specification (Draft - Synthetic Data Schema Definition)
 
@@ -519,7 +494,7 @@ The configuration hierarchy adheres strictly to the defined priority order: **De
 
 ### VII. Observability Plan
 
-The `synthetic-data-generator` and `data-loader-utility` must be instrumented to provide comprehensive observability.
+The `synthetic-data-generator` service (and any future dedicated data-loader utility) must be instrumented to provide comprehensive observability.
 
 #### A. Key Metrics & SLOs
 

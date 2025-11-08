@@ -568,6 +568,46 @@ const renderGenerationRuns = (runs) => {
   const list = document.createElement('ul');
   list.className = 'runs-list';
 
+  const formatRowValue = (value) => {
+    if (typeof value === 'number') {
+      return value.toLocaleString();
+    }
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed)) {
+      return parsed.toLocaleString();
+    }
+    return String(value ?? '0');
+  };
+
+  const formatRowCounts = (counts) => {
+    if (!counts || typeof counts !== 'object') {
+      return '';
+    }
+
+    const segments = [];
+    Object.entries(counts).forEach(([section, value]) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const tables = Object.entries(value);
+        if (tables.length === 0) {
+          return;
+        }
+        const tableLines = tables
+          .map(
+            ([tableName, rows]) =>
+              `&nbsp;&nbsp;${tableName}: ${formatRowValue(rows)} rows`
+          )
+          .join('<br>');
+        segments.push(`<div><strong>${section}:</strong><br>${tableLines}</div>`);
+      } else if (value !== undefined && value !== null) {
+        segments.push(
+          `<div><strong>${section}:</strong> ${formatRowValue(value)} rows</div>`
+        );
+      }
+    });
+
+    return segments.join('<br>');
+  };
+
   runs.forEach((run) => {
     const item = document.createElement('li');
     item.className = 'run-card';
@@ -576,12 +616,12 @@ const renderGenerationRuns = (runs) => {
     let rowCountsDisplay = '';
     try {
       const rowCounts = JSON.parse(run.row_counts || '{}');
-      const entries = Object.entries(rowCounts);
-      if (entries.length > 0) {
+      const formattedRowCounts = formatRowCounts(rowCounts);
+      if (formattedRowCounts) {
         rowCountsDisplay = `
           <div class="run-tables">
             <strong>Tables:</strong><br>
-            ${entries.map(([table, count]) => `${table}: ${count.toLocaleString()} rows`).join('<br>')}
+            ${formattedRowCounts}
           </div>
         `;
       }
