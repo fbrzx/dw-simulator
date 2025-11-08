@@ -187,3 +187,98 @@ def test_import_sql_command_invalid_dialect(monkeypatch: pytest.MonkeyPatch, tmp
     )
     assert result.exit_code == 1
     assert "Unsupported dialect" in result.stderr
+
+
+def test_experiment_load_command_with_explicit_run_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test loading experiment data with explicit run_id."""
+    monkeypatch.setenv("DW_SIMULATOR_TARGET_DB_URL", f"sqlite:///{tmp_path/'warehouse.db'}")
+    schema = {
+        "name": "LoadMe",
+        "tables": [
+            {
+                "name": "customers",
+                "target_rows": 5,
+                "columns": [{"name": "customer_id", "data_type": "INT", "is_unique": True}],
+            }
+        ],
+    }
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(json.dumps(schema))
+
+    # Create experiment
+    create_result = runner.invoke(app, ["experiment", "create", str(schema_path)])
+    assert create_result.exit_code == 0
+
+    # Generate data
+    output_dir = tmp_path / "generated"
+    generate_result = runner.invoke(
+        app,
+        ["experiment", "generate", "LoadMe", "--output-dir", str(output_dir)],
+    )
+    assert generate_result.exit_code == 0
+
+    # Load data with explicit run_id=1
+    load_result = runner.invoke(app, ["experiment", "load", "LoadMe", "--run-id", "1"])
+    assert load_result.exit_code == 0
+    assert "Loaded data for experiment 'LoadMe'" in load_result.stdout
+    assert "customers: 5 rows" in load_result.stdout
+
+
+def test_experiment_load_command_without_run_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test loading experiment data using most recent run (no run_id specified)."""
+    monkeypatch.setenv("DW_SIMULATOR_TARGET_DB_URL", f"sqlite:///{tmp_path/'warehouse.db'}")
+    schema = {
+        "name": "LoadLatest",
+        "tables": [
+            {
+                "name": "orders",
+                "target_rows": 3,
+                "columns": [{"name": "order_id", "data_type": "INT", "is_unique": True}],
+            }
+        ],
+    }
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(json.dumps(schema))
+
+    # Create and generate
+    runner.invoke(app, ["experiment", "create", str(schema_path)])
+    output_dir = tmp_path / "generated"
+    runner.invoke(app, ["experiment", "generate", "LoadLatest", "--output-dir", str(output_dir)])
+
+    # Load without specifying run_id (should use most recent)
+    load_result = runner.invoke(app, ["experiment", "load", "LoadLatest"])
+    assert load_result.exit_code == 0
+    assert "Loaded data for experiment 'LoadLatest'" in load_result.stdout
+
+
+def test_experiment_load_command_experiment_not_found(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test loading data for non-existent experiment."""
+    monkeypatch.setenv("DW_SIMULATOR_TARGET_DB_URL", f"sqlite:///{tmp_path/'warehouse.db'}")
+    result = runner.invoke(app, ["experiment", "load", "NonExistent"])
+    assert result.exit_code == 1
+    assert "does not exist" in result.stderr
+
+
+def test_experiment_load_command_no_completed_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test loading when no completed generation runs exist."""
+    monkeypatch.setenv("DW_SIMULATOR_TARGET_DB_URL", f"sqlite:///{tmp_path/'warehouse.db'}")
+    schema = {
+        "name": "NoRuns",
+        "tables": [
+            {
+                "name": "items",
+                "target_rows": 2,
+                "columns": [{"name": "item_id", "data_type": "INT", "is_unique": True}],
+            }
+        ],
+    }
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(json.dumps(schema))
+
+    # Create experiment but don't generate data
+    runner.invoke(app, ["experiment", "create", str(schema_path)])
+
+    # Try to load (should fail - no runs)
+    result = runner.invoke(app, ["experiment", "load", "NoRuns"])
+    assert result.exit_code == 1
+    assert "No completed generation runs" in result.stderr

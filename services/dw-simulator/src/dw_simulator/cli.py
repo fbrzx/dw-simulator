@@ -23,6 +23,7 @@ from .service import (
     ExperimentDeleteResult,
     ExperimentResetResult,
     ExperimentGenerateResult,
+    ExperimentLoadResult,
     QueryExecutionResult,
     ExperimentService,
     SUPPORTED_DIALECTS,
@@ -167,6 +168,26 @@ def generate_experiment(
         typer.echo(f" - {table.table_name}: {table.row_count} rows across {len(table.files)} file(s)")
 
 
+@experiment_app.command("load")
+def load_experiment(
+    name: str = typer.Argument(..., help="Experiment name to load data for."),
+    run_id: int | None = typer.Option(None, "--run-id", help="Specific generation run ID to load (defaults to most recent)."),
+) -> None:
+    """Load Parquet files from a generation run into warehouse tables."""
+
+    service = ExperimentService()
+    result = service.load_experiment_data(experiment_name=name, run_id=run_id)
+    if not result.success:
+        _print_load_errors_and_exit(result)
+
+    typer.secho(
+        f"Loaded data for experiment '{name}' ({result.loaded_tables} table(s))",
+        fg=typer.colors.GREEN,
+    )
+    for table_name, row_count in result.row_counts.items():
+        typer.echo(f" - {table_name}: {row_count} rows")
+
+
 @experiment_app.command("import-sql")
 def import_sql_command(
     sql_file: Path = typer.Argument(..., help="Path to the SQL file containing CREATE TABLE statements."),
@@ -250,6 +271,12 @@ def save_query(
 
 
 def _print_errors_and_exit(result: ExperimentDeleteResult | ExperimentCreateResult | ExperimentResetResult | ExperimentGenerateResult) -> None:
+    for error in result.errors:
+        typer.secho(error, err=True, fg=typer.colors.RED)
+    raise typer.Exit(code=1)
+
+
+def _print_load_errors_and_exit(result: ExperimentLoadResult) -> None:
     for error in result.errors:
         typer.secho(error, err=True, fg=typer.colors.RED)
     raise typer.Exit(code=1)

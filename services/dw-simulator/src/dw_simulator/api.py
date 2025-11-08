@@ -16,6 +16,7 @@ from .service import (
     ExperimentDeleteResult,
     ExperimentResetResult,
     ExperimentGenerateResult,
+    ExperimentLoadResult,
     ExperimentService,
     QueryExecutionResult,
     SUPPORTED_DIALECTS,
@@ -35,6 +36,10 @@ class GeneratePayload(BaseModel):
     rows: dict[str, int] | None = Field(default=None, description="Optional row overrides per table.")
     seed: int | None = Field(default=None, description="Optional RNG seed.")
     output_dir: str | None = Field(default=None, description="Optional output directory for Parquet files.")
+
+
+class LoadPayload(BaseModel):
+    run_id: int | None = Field(default=None, description="Specific generation run ID to load (defaults to most recent).")
 
 
 class SqlImportPayload(BaseModel):
@@ -146,6 +151,24 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             ],
         }
 
+    @app.post("/api/experiments/{name}/load")
+    def load_experiment(name: str, payload: LoadPayload) -> dict[str, Any]:
+        """Load Parquet files from a generation run into warehouse tables."""
+        result = _service().load_experiment_data(
+            experiment_name=name,
+            run_id=payload.run_id,
+        )
+        if not result.success:
+            raise HTTPException(
+                status_code=_http_status_for_load_errors(result),
+                detail=result.errors,
+            )
+        return {
+            "experiment": name,
+            "loaded_tables": result.loaded_tables,
+            "row_counts": result.row_counts,
+        }
+
     @app.get("/api/experiments/{name}/runs")
     def list_generation_runs(name: str) -> dict[str, Any]:
         """List all generation runs for an experiment, most recent first."""
@@ -251,6 +274,17 @@ def _http_status_for_errors(
     if "already running" in messages or "generation is running" in messages:
         return status.HTTP_409_CONFLICT
     return status.HTTP_400_BAD_REQUEST
+
+
+def _http_status_for_load_errors(result: ExperimentLoadResult) -> int:
+    """Translate load errors into HTTP statuses."""
+
+    messages = " ".join(result.errors).lower()
+    if "does not exist" in messages:
+        return status.HTTP_404_NOT_FOUND
+    if "no completed generation runs" in messages:
+        return status.HTTP_409_CONFLICT
+    return status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
 app = create_app()

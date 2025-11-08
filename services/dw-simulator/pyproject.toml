@@ -35,3 +35,8 @@ dw-sim = "dw_simulator.cli:app"
 [tool.pytest.ini_options]
 addopts = "--cov=dw_simulator --cov-report=term-missing --cov-fail-under=90"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pandas>=2.3.3",
+]
