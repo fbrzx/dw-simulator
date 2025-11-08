@@ -198,7 +198,8 @@ The dual-database architecture has been implemented and tested. The system now s
 - **Step 1 (✅ COMPLETE):** Extended schema model with `DistributionConfig` support on `ColumnSchema`, added validation for numeric columns and required parameters, updated `docs/tech-spec.md`, and introduced new schema unit tests.
 - **Step 2 (✅ COMPLETE):** Implemented generator support for normal, exponential, and beta distributions with deterministic seeding driven by the existing RNG. Added clamped range handling for all numeric columns, beta scaling into configured min/max windows, and integer rounding consistent with schema constraints. Introduced focused unit tests covering each distribution to guarantee reproducible output sequences and boundary enforcement.
 - **Step 3 (✅ COMPLETE):** Surfaced distribution metadata across the CLI, API, and Web UI. The CLI now prints a distribution summary after successful experiment creation, `GET /api/experiments` returns a `distributions` array per experiment, and the Web UI renders distribution badges on experiment cards plus per-table details in the generate modal. Documentation updated with JSON examples and workflow guidance. New API/CLI tests verify the response payloads and console output.
-- **Step 4:** Expand test coverage (unit + integration) to verify distribution enforcement and CLI/API behavior.
+- **Step 4 (✅ COMPLETE):** Expanded generator + service distribution coverage with new unit and integration tests verifying
+  seeded runs respect numeric bounds, CLI helper formatting, and API summaries for multi-column configurations.
 
 ## Backlog
 

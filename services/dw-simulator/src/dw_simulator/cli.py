@@ -322,6 +322,11 @@ def _summarize_distribution_columns(schema_json: str) -> list[str]:
     except (ValidationError, ValueError):
         return []
 
+    def _format_parameter(value: object) -> str:
+        if isinstance(value, float):
+            return str(int(value)) if value.is_integer() else str(value)
+        return str(value)
+
     lines: list[str] = []
     for table in schema.tables:
         for column in table.columns:
@@ -329,7 +334,7 @@ def _summarize_distribution_columns(schema_json: str) -> list[str]:
                 continue
 
             parameters = ", ".join(
-                f"{key}={column.distribution.parameters[key]}"
+                f"{key}={_format_parameter(column.distribution.parameters[key])}"
                 for key in sorted(column.distribution.parameters)
             )
             lines.append(

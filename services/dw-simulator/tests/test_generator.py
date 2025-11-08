@@ -6,7 +6,12 @@ import pyarrow.parquet as pq
 import pytest
 from faker import Faker
 
-from dw_simulator.generator import ExperimentGenerator, GenerationRequest, GenerationError
+from dw_simulator.generator import (
+    ExperimentGenerator,
+    GenerationRequest,
+    GenerationError,
+    TableGenerationResult,
+)
 from dw_simulator.schema import ColumnSchema, ExperimentSchema, TableSchema
 
 
@@ -202,6 +207,78 @@ def test_generator_beta_distribution_scales_to_range() -> None:
         expected.append(10.0 + (20.0 - 10.0) * beta_sample)
 
     assert values == pytest.approx(expected)
+
+
+def test_generator_generate_respects_distribution_bounds(tmp_path: Path) -> None:
+    """Full table generation respects configured distributions across batches."""
+
+    schema = ExperimentSchema(
+        name="distribution_batch_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="metrics",
+                target_rows=75,
+                columns=[
+                    ColumnSchema(name="metric_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="score",
+                        data_type="INT",
+                        min_value=0,
+                        max_value=100,
+                        distribution={
+                            "type": "normal",
+                            "parameters": {"mean": 50, "stddev": 10},
+                        },
+                    ),
+                    ColumnSchema(
+                        name="ratio",
+                        data_type="FLOAT",
+                        min_value=10.0,
+                        max_value=20.0,
+                        distribution={
+                            "type": "beta",
+                            "parameters": {"alpha": 2.5, "beta": 3.5},
+                        },
+                    ),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=20)
+
+    first_run = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "run1", seed=2024)
+    )
+    second_run = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "run2", seed=2024)
+    )
+
+    assert len(first_run.tables) == 1
+    assert len(second_run.tables) == 1
+
+    def _collect(table_result: TableGenerationResult) -> tuple[list[int], list[float]]:
+        int_values: list[int] = []
+        float_values: list[float] = []
+        for file_path in table_result.files:
+            table = pq.read_table(file_path)
+            int_values.extend(table.column("score").to_pylist())
+            float_values.extend(table.column("ratio").to_pylist())
+        return int_values, float_values
+
+    first_scores, first_ratios = _collect(first_run.tables[0])
+    second_scores, second_ratios = _collect(second_run.tables[0])
+
+    assert len(first_scores) == 75
+    assert len(first_ratios) == 75
+
+    assert all(0 <= value <= 100 for value in first_scores)
+    assert all(10.0 <= value <= 20.0 for value in first_ratios)
+
+    # Deterministic seeding should yield identical values across runs.
+    assert first_scores == second_scores
+    assert first_ratios == pytest.approx(second_ratios)
 
 
 def test_generator_surrogate_key_starts_at_one(tmp_path: Path) -> None:
