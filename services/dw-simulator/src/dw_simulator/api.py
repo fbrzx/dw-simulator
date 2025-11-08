@@ -81,7 +81,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
         experiments = _service().list_experiments()
         summaries = []
         for experiment in experiments:
-            table_names = _service().persistence.list_tables(experiment.name)
+            table_count = _service().persistence.get_table_count(experiment.name)
             warnings = _service().get_experiment_warnings(experiment.name)
             # Include schema for UI to show table details
             summaries.append(
@@ -89,7 +89,7 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
                     "name": experiment.name,
                     "description": experiment.description,
                     "created_at": experiment.created_at.isoformat(),
-                    "table_count": len(table_names),
+                    "table_count": table_count,
                     "schema": experiment.schema_json,
                     "warnings": warnings,
                     "warehouse_type": experiment.warehouse_type,

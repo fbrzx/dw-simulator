@@ -16,6 +16,12 @@ const mainTabs = document.querySelectorAll('.main-tab');
 const tabPanels = document.querySelectorAll('.tab-panel');
 
 const switchMainTab = (tabName) => {
+  // Check if trying to switch to query tab when it's disabled
+  const queryTab = Array.from(mainTabs).find(tab => tab.dataset.tab === 'query');
+  if (tabName === 'query' && queryTab && queryTab.disabled) {
+    return; // Don't allow switching to disabled query tab
+  }
+
   mainTabs.forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.tab === tabName);
   });
@@ -91,6 +97,28 @@ modeTabs.forEach((tab) => {
   tab.addEventListener('click', () => switchMode(tab.dataset.mode));
 });
 
+const updateQueryTabState = (experiments) => {
+  const queryTab = Array.from(mainTabs).find(tab => tab.dataset.tab === 'query');
+  if (!queryTab) return;
+
+  const hasExperiments = experiments && experiments.length > 0;
+
+  if (hasExperiments) {
+    // Enable the query tab
+    queryTab.disabled = false;
+    queryTab.title = '';
+  } else {
+    // Disable the query tab
+    queryTab.disabled = true;
+    queryTab.title = 'Create an experiment first to use the SQL Query interface';
+
+    // If currently on query tab, switch to experiments tab
+    if (queryTab.classList.contains('active')) {
+      switchMainTab('experiments');
+    }
+  }
+};
+
 const fetchExperiments = async () => {
   setStatus('Loading experiments...');
   try {
@@ -100,6 +128,7 @@ const fetchExperiments = async () => {
     const experiments = data.experiments ?? [];
     renderExperiments(experiments);
     populateExperimentSelector(experiments);
+    updateQueryTabState(experiments);
     setStatus(`Loaded ${experiments.length} experiment(s).`);
   } catch (error) {
     console.error(error);
@@ -111,7 +140,7 @@ const renderExperiments = (experiments) => {
   warningListCounter = 0;
   experimentListEl.innerHTML = '';
   if (!experiments.length) {
-    experimentListEl.innerHTML = '<li>No experiments yet. Create one below.</li>';
+    experimentListEl.innerHTML = '<li>No experiments yet.</li>';
     return;
   }
 
@@ -561,22 +590,30 @@ const rowCountDisplay = document.getElementById('row-count-display');
 const clearQueryBtn = document.getElementById('clear-query-btn');
 const saveQueryBtn = document.getElementById('save-query-btn');
 const exportCsvBtn = document.getElementById('export-csv-btn');
+const dialectInfo = document.getElementById('dialect-info');
+const selectedWarehouse = document.getElementById('selected-warehouse');
+const selectedDialect = document.getElementById('selected-dialect');
 
 let lastQueryResult = null;
 
-const populateExperimentSelector = (experiments) => {
-  // Keep the "None" option
-  const noneOption = experimentSelect.querySelector('option[value=""]');
-  experimentSelect.innerHTML = '';
-  if (noneOption) {
-    experimentSelect.appendChild(noneOption);
-  }
+// Warehouse to SQL dialect mapping
+const warehouseDialectMap = {
+  'sqlite': 'SQLite',
+  'redshift': 'PostgreSQL (Redshift-compatible)',
+  'snowflake': 'Snowflake SQL'
+};
 
-  // Add experiment options
+const populateExperimentSelector = (experiments) => {
+  // Clear and add placeholder
+  experimentSelect.innerHTML = '<option value="" disabled selected>Select an experiment...</option>';
+
+  // Add experiment options with warehouse info
   experiments.forEach((experiment) => {
     const option = document.createElement('option');
     option.value = experiment.name;
-    option.textContent = experiment.name;
+    option.dataset.warehouse = experiment.warehouse_type || 'sqlite';
+    const warehouseLabel = experiment.warehouse_type ? ` (${experiment.warehouse_type})` : '';
+    option.textContent = `${experiment.name}${warehouseLabel}`;
     experimentSelect.appendChild(option);
   });
 };
@@ -604,6 +641,12 @@ const executeQuery = async (event) => {
     return;
   }
 
+  const experimentName = experimentSelect.value;
+  if (!experimentName) {
+    setQueryStatus('Please select an experiment.', 'error');
+    return;
+  }
+
   // Hide previous results
   queryResultsContainer.classList.add('hidden');
   lastQueryResult = null;
@@ -611,11 +654,11 @@ const executeQuery = async (event) => {
   setQueryStatus('Executing query...');
 
   try {
-    const experimentName = experimentSelect.value || null;
-    const payload = { sql, format: 'json' };
-    if (experimentName) {
-      payload.experiment_name = experimentName;
-    }
+    const payload = {
+      sql,
+      format: 'json',
+      experiment_name: experimentName
+    };
 
     const response = await fetch(`${API_BASE}/query/execute`, {
       method: 'POST',
@@ -722,14 +765,21 @@ const exportCsv = async () => {
   }
 
   const sql = queryInput.value.trim();
+  const experimentName = experimentSelect.value;
+
+  if (!experimentName) {
+    setQueryStatus('Please select an experiment.', 'error');
+    return;
+  }
+
   setQueryStatus('Exporting to CSV...');
 
   try {
-    const experimentName = experimentSelect.value || null;
-    const payload = { sql, format: 'csv' };
-    if (experimentName) {
-      payload.experiment_name = experimentName;
-    }
+    const payload = {
+      sql,
+      format: 'csv',
+      experiment_name: experimentName
+    };
 
     const response = await fetch(`${API_BASE}/query/execute`, {
       method: 'POST',
@@ -763,6 +813,21 @@ const exportCsv = async () => {
     setQueryStatus(error.message || 'Failed to export CSV', 'error');
   }
 };
+
+// Event listener for experiment selection to show dialect info
+experimentSelect.addEventListener('change', () => {
+  const selectedOption = experimentSelect.options[experimentSelect.selectedIndex];
+  if (selectedOption && selectedOption.value) {
+    const warehouse = selectedOption.dataset.warehouse || 'sqlite';
+    const dialect = warehouseDialectMap[warehouse] || warehouse.toUpperCase();
+
+    selectedWarehouse.textContent = warehouse.toUpperCase();
+    selectedDialect.textContent = dialect;
+    dialectInfo.classList.remove('hidden');
+  } else {
+    dialectInfo.classList.add('hidden');
+  }
+});
 
 // Event listeners for query interface
 queryForm.addEventListener('submit', executeQuery);

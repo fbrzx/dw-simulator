@@ -77,6 +77,17 @@ main {
   background: var(--accent);
 }
 
+.main-tab:disabled {
+  color: #484f58;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.main-tab:disabled:hover {
+  background: transparent;
+  color: #484f58;
+}
+
 /* Tab content */
 .tab-content {
   width: 100%;
@@ -152,6 +163,22 @@ label {
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 600;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-field label {
+  margin-bottom: 0.5rem;
 }
 
 .actions {
@@ -499,6 +526,26 @@ button.cancel-btn {
   margin-top: -0.5rem;
   margin-bottom: 0.75rem;
   font-style: italic;
+}
+
+.dialect-info {
+  background: rgba(47, 129, 247, 0.1);
+  border: 1px solid rgba(47, 129, 247, 0.3);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #c9d1d9;
+}
+
+.dialect-info strong {
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.dialect-info span {
+  color: #f0f6fc;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 
 .query-actions {

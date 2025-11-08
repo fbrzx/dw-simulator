@@ -28,6 +28,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    func,
     inspect,
     select,
     text,
@@ -349,6 +350,17 @@ class ExperimentPersistence:
         prefix = normalize_identifier(experiment_name) + "__"
         return [table for table in all_tables if table.startswith(prefix)]
 
+    def get_table_count(self, experiment_name: str) -> int:
+        """Get the number of tables defined for an experiment from metadata."""
+
+        with self.engine.connect() as conn:
+            result = conn.execute(
+                select(func.count()).select_from(self._experiment_tables).where(
+                    self._experiment_tables.c.experiment_name == experiment_name
+                )
+            ).scalar()
+            return result or 0
+
     def list_experiments(self) -> list[ExperimentMetadata]:
         """Return all experiment metadata rows."""
 
@@ -662,17 +674,19 @@ class ExperimentPersistence:
             warehouse_engine = self.warehouse_engine
 
         try:
-            # Execute query against warehouse database (where actual data lives)
-            with warehouse_engine.connect() as conn:
-                # If experiment is specified, create temporary views for easier querying
-                if experiment_name:
-                    # Get the list of tables for this experiment
-                    table_rows = conn.execute(
+            # If experiment is specified, get table list from metadata DB first
+            if experiment_name:
+                with self.engine.connect() as metadata_conn:
+                    table_rows = metadata_conn.execute(
                         select(self._experiment_tables.c.table_name).where(
                             self._experiment_tables.c.experiment_name == experiment_name
                         )
                     ).all()
 
+            # Execute query against warehouse database (where actual data lives)
+            with warehouse_engine.connect() as conn:
+                # If experiment is specified, create temporary views for easier querying
+                if experiment_name:
                     # Create temporary views for each table
                     for row in table_rows:
                         logical_name = row.table_name

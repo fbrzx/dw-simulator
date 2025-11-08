@@ -12,8 +12,6 @@ env:
   COMPOSE_FILE: docker-compose.yml
   # Test configuration
   PYTHONPATH: src
-  # LocalStack config (optional - only needed for paid features)
-  LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
 
 jobs:
   # =============================================================================

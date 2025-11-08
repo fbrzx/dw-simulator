@@ -53,12 +53,11 @@
               <form id="json-form">
                 <label for="json-warehouse-select">Target Warehouse</label>
                 <select id="json-warehouse-select">
-                  <option value="">Default (configured in environment)</option>
+                  <option value="">Default (priority: Redshift > Snowflake > SQLite)</option>
                   <option value="sqlite">SQLite</option>
                   <option value="redshift">Redshift (PostgreSQL emulator)</option>
                   <option value="snowflake">Snowflake (LocalStack emulator)</option>
                 </select>
-                <small class="form-hint">Choose which warehouse to store experiment data in. Default uses system configuration priority.</small>
                 <label for="schema-input">Paste experiment JSON schema</label>
                 <textarea id="schema-input" rows="12" required></textarea>
                 <div class="actions">
@@ -69,21 +68,27 @@
               <form id="sql-form" class="hidden">
                 <label for="sql-experiment-name">Experiment name</label>
                 <input id="sql-experiment-name" type="text" placeholder="rl_dw" required />
-                <label for="dialect-select">SQL Dialect (for parsing)</label>
-                <select id="dialect-select">
-                  <option value="redshift">Amazon Redshift</option>
-                  <option value="snowflake">Snowflake</option>
-                  <option value="ansi">ANSI</option>
-                </select>
-                <small class="form-hint">SQL dialect used to parse your CREATE TABLE statements.</small>
-                <label for="warehouse-select">Target Warehouse (for storage)</label>
-                <select id="warehouse-select">
-                  <option value="">Default (configured in environment)</option>
-                  <option value="sqlite">SQLite</option>
-                  <option value="redshift">Redshift (PostgreSQL emulator)</option>
-                  <option value="snowflake">Snowflake (LocalStack emulator)</option>
-                </select>
-                <small class="form-hint">Choose which warehouse to store experiment data in. Default uses system configuration priority.</small>
+
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="dialect-select">SQL Dialect</label>
+                    <select id="dialect-select">
+                      <option value="redshift">Amazon Redshift</option>
+                      <option value="snowflake">Snowflake</option>
+                      <option value="ansi">ANSI</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label for="warehouse-select">Target Warehouse</label>
+                    <select id="warehouse-select">
+                      <option value="">Default (priority: Redshift > Snowflake > SQLite)</option>
+                      <option value="sqlite">SQLite</option>
+                      <option value="redshift">Redshift (PostgreSQL emulator)</option>
+                      <option value="snowflake">Snowflake (LocalStack emulator)</option>
+                    </select>
+                  </div>
+                </div>
+
                 <label for="sql-input">Paste SQL (CREATE TABLE ...)</label>
                 <textarea id="sql-input" rows="12" required></textarea>
                 <div class="actions">
@@ -117,11 +122,16 @@
               <p class="query-description">Execute SQL queries against your populated experiments and export results.</p>
 
               <form id="query-form">
-                <label for="experiment-select">Experiment (optional)</label>
-                <select id="experiment-select">
-                  <option value="">None - Use full table names (experiment__table)</option>
+                <label for="experiment-select">Experiment</label>
+                <select id="experiment-select" required>
+                  <option value="" disabled selected>Select an experiment...</option>
                 </select>
-                <small class="query-hint">Select an experiment to use simple table names (e.g., "customers" instead of "experiment__customers")</small>
+                <small class="query-hint">Select an experiment to query. You can use simple table names (e.g., "customers" instead of "customers_experiment__customers")</small>
+
+                <div id="dialect-info" class="dialect-info hidden">
+                  <strong>Warehouse:</strong> <span id="selected-warehouse">-</span> ·
+                  <strong>SQL Dialect:</strong> <span id="selected-dialect">-</span>
+                </div>
 
                 <label for="query-input">SQL Query</label>
                 <textarea
