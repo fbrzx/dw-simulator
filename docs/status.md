@@ -2,10 +2,10 @@
 
 ## Completed User Stories
 
-### US 5.1 – Load generated Parquet files into warehouse tables (✅ COMPLETE)
+### US 5.1 – Load generated Parquet files into warehouse tables (⚠️ PARTIAL - SQLite Only)
 Enable the query interface to access generated data by loading Parquet files into physical database tables.
 
-**Implementation Summary:**
+**Current Implementation (SQLite):**
 - **Step 1 (✅)**: Added `ExperimentPersistence.load_parquet_files_to_table()` for batch loading with error handling
 - **Step 2 (✅)**: Added `ExperimentPersistence.load_generation_run()` for orchestrating batch loading across tables
 - **Step 3 (✅)**: Integrated auto-loading into `ExperimentService.generate_data()` workflow
@@ -13,12 +13,18 @@ Enable the query interface to access generated data by loading Parquet files int
 - **Step 5 (✅)**: Added CLI command `dw-sim experiment load` and API endpoint `POST /api/experiments/{name}/load`
 - **Step 6 (✅)**: Added integration tests and comprehensive documentation
 
-**All acceptance criteria met:**
-- AC 1 (Auto-load): Data automatically loaded after generation completes
-- AC 2 (Verify loaded data): Query row counts match generated counts
-- AC 3 (Manual load): `dw-sim experiment load` command available
-- AC 4 (API endpoint): `POST /api/experiments/{name}/load` implemented
-- AC 5 (Error handling): Clear error messages for all failure scenarios
+**Current Limitations:**
+- ⚠️ Data is loaded into **SQLite only**, not the Redshift/Snowflake emulators
+- ⚠️ SQL queries run against SQLite, not actual warehouse emulators
+- ⚠️ Users cannot test Redshift/Snowflake-specific SQL features
+- ⚠️ The `services/data-loader` service (planned for COPY commands to emulators) is not yet implemented
+
+**Acceptance criteria (SQLite-based):**
+- AC 1 (Auto-load): Data automatically loaded after generation completes ✅
+- AC 2 (Verify loaded data): Query row counts match generated counts ✅
+- AC 3 (Manual load): `dw-sim experiment load` command available ✅
+- AC 4 (API endpoint): `POST /api/experiments/{name}/load` implemented ✅
+- AC 5 (Error handling): Clear error messages for all failure scenarios ✅
 
 **Test coverage:**
 - Service layer: 7 unit tests
@@ -26,6 +32,9 @@ Enable the query interface to access generated data by loading Parquet files int
 - API: 4 tests
 - Integration: 2 end-to-end tests
 - Total: 150 tests passing
+
+**Next Steps (Required for Full Completion):**
+See US 5.2 below for Redshift/Snowflake emulator integration.
 
 ### US 1.4 – Composite primary key support/guidance (✅ COMPLETE)
 When importing SQL with composite primary keys (e.g., `PRIMARY KEY (id1, id2)`), the simulator generates a surrogate key and clearly explains the approach to users.
@@ -84,7 +93,57 @@ Enable users to define data generation rules for columns to produce realistic, c
 
 ## Active User Story
 
-None - All planned user stories have been completed.
+### US 5.2 – Implement data-loader service for Redshift/Snowflake emulators (🔴 HIGH PRIORITY - NOT STARTED)
+
+**Goal:** Enable SQL queries against local Redshift and Snowflake emulators instead of SQLite, allowing users to test warehouse-specific SQL features.
+
+**Current Blocker:**
+The project infrastructure includes Redshift (PostgreSQL) and Snowflake (LocalStack) emulators in docker-compose.yml, but they are not being used. All data loading and querying currently happens against SQLite, which defeats the core project goal of simulating real warehouse environments.
+
+**Implementation Plan:**
+
+**Phase 1: Redshift Emulator Integration (P0)**
+1. **Update persistence layer configuration:**
+   - Add support for multiple database engines (SQLite for metadata, PostgreSQL for Redshift emulator)
+   - Add `DW_SIMULATOR_REDSHIFT_URL` environment variable pointing to `postgresql://dw_user:dw_pass@local-redshift-mock:5432/dw_simulator`
+   - Modify `load_parquet_files_to_table()` to use Redshift connection for data loading
+
+2. **Implement COPY command for Redshift:**
+   - Instead of inserting records directly, upload Parquet to LocalStack S3
+   - Execute PostgreSQL `COPY FROM` command to load from S3 (simulating Redshift COPY)
+   - Handle Redshift-specific data types and constraints
+
+3. **Update query execution:**
+   - Modify `execute_query()` to run against Redshift emulator
+   - Test Redshift-specific SQL features (window functions, DISTKEY, SORTKEY, etc.)
+
+**Phase 2: Snowflake Emulator Integration (P1)**
+4. **Configure Snowflake emulator connection:**
+   - Add `DW_SIMULATOR_SNOWFLAKE_URL` environment variable
+   - Test LocalStack Snowflake emulator capabilities
+
+5. **Implement Snowpipe-style loading:**
+   - Stage Parquet files in LocalStack S3
+   - Execute Snowflake COPY INTO commands
+   - Handle Snowflake-specific data types (VARIANT, ARRAY, OBJECT)
+
+**Phase 3: Multi-warehouse Support (P2)**
+6. **Add warehouse selection:**
+   - Allow users to choose target warehouse (SQLite/Redshift/Snowflake) per experiment
+   - Add `--target-warehouse` flag to CLI commands
+   - Update API to accept warehouse parameter
+   - Update Web UI with warehouse selector
+
+**Acceptance Criteria:**
+- AC 1: Users can create experiments targeting Redshift emulator
+- AC 2: Generated data is loaded into PostgreSQL (Redshift mock) via COPY commands
+- AC 3: SQL queries execute against Redshift emulator and support Redshift-specific syntax
+- AC 4: CLI/API/UI clearly indicate which warehouse is being used
+- AC 5: All existing tests pass with new warehouse options
+
+**Estimated Effort:** 5-7 days
+**Dependencies:** None (infrastructure already exists in docker-compose.yml)
+**Risk:** LocalStack Snowflake emulator may have limited feature support
 
 ## Recent Work
 - **Parquet data loading (US 5.1 - ✅ COMPLETE):** Successfully completed all 6 steps of the implementation plan. Added auto-loading after generation, manual load command (`dw-sim experiment load`), API endpoint (`POST /api/experiments/{name}/load`), comprehensive test coverage (17 new tests: 7 service + 4 CLI + 4 API + 2 integration), and full documentation. All 150 tests passing with full end-to-end coverage achieved.
@@ -97,4 +156,10 @@ None - All planned user stories have been completed.
 - **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest tests/test_service.py -o addopts="" -p no:cov` (34 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
 
 ## Backlog
-All current user stories complete. Ready for next epic or feature requests.
+
+### Future Enhancements
+- **US 6.1:** Advanced data generation with statistical distributions (integrate SDV library)
+- **US 6.2:** Foreign key relationship enforcement during generation
+- **US 6.3:** Performance optimization for 10M+ row datasets
+- **US 6.4:** Data lineage tracking and visualization
+- **US 6.5:** Export experiments as Docker images for reproducibility

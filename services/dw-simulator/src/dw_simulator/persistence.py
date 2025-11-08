@@ -32,7 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from .config import get_target_db_url
+from .config import get_target_db_url, get_redshift_url
 from .schema import ColumnSchema, DataType, ExperimentSchema
 
 import pyarrow.parquet as pq
@@ -109,11 +109,29 @@ class QueryResult:
 
 
 class ExperimentPersistence:
-    """Coordinates metadata storage plus warehouse table creation."""
+    """Coordinates metadata storage plus warehouse table creation.
 
-    def __init__(self, connection_string: str | None = None) -> None:
+    Uses dual-database architecture:
+    - metadata_engine (SQLite): Stores experiment schemas, metadata, and generation runs
+    - warehouse_engine (PostgreSQL/Redshift): Stores actual data tables for querying
+    """
+
+    def __init__(
+        self,
+        connection_string: str | None = None,
+        warehouse_url: str | None = None,
+    ) -> None:
+        # Metadata database (SQLite) - stores experiment definitions and tracking
         self.connection_string = connection_string or get_target_db_url()
         self.engine: Engine = create_engine(self.connection_string, future=True)
+
+        # Warehouse database (PostgreSQL/Redshift) - stores actual data tables
+        # Falls back to metadata DB (SQLite) if not configured (for testing/local development)
+        self.warehouse_url = warehouse_url if warehouse_url is not None else get_redshift_url()
+        if self.warehouse_url is None:
+            self.warehouse_url = self.connection_string  # Use same as metadata DB
+        self.warehouse_engine: Engine = create_engine(self.warehouse_url, future=True)
+
         self._metadata = MetaData()
         self._experiments = Table(
             "experiments",
@@ -245,14 +263,18 @@ class ExperimentPersistence:
         ]
 
     def delete_experiment(self, name: str) -> int:
-        """Drop experiment tables and metadata. Returns number of dropped tables."""
+        """
+        Drop experiment tables from warehouse database and metadata from metadata database.
+        Returns number of dropped tables.
+        """
 
         try:
-            with self.engine.begin() as conn:
-                if not self._experiment_exists(conn, name):
+            # Get table list from metadata database
+            with self.engine.begin() as metadata_conn:
+                if not self._experiment_exists(metadata_conn, name):
                     raise ExperimentNotFoundError(f"Experiment '{name}' does not exist.")
 
-                table_rows = conn.execute(
+                table_rows = metadata_conn.execute(
                     select(self._experiment_tables.c.table_name).where(
                         self._experiment_tables.c.experiment_name == name
                     )
@@ -261,24 +283,27 @@ class ExperimentPersistence:
                     self._physical_table_name(name, row.table_name) for row in table_rows
                 ]
 
-                inspector = inspect(conn)
+                # Drop physical tables from warehouse database
+                inspector = inspect(self.warehouse_engine)
                 dropped = 0
-                for table_name in physical_tables:
-                    if inspector.has_table(table_name):
-                        conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{table_name}"')
-                        dropped += 1
+                with self.warehouse_engine.begin() as warehouse_conn:
+                    for table_name in physical_tables:
+                        if inspector.has_table(table_name):
+                            warehouse_conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{table_name}"')
+                            dropped += 1
 
-                conn.execute(
+                # Delete metadata
+                metadata_conn.execute(
                     self._experiment_tables.delete().where(
                         self._experiment_tables.c.experiment_name == name
                     )
                 )
-                conn.execute(
+                metadata_conn.execute(
                     self._generation_runs.delete().where(
                         self._generation_runs.c.experiment_name == name
                     )
                 )
-                conn.execute(self._experiments.delete().where(self._experiments.c.name == name))
+                metadata_conn.execute(self._experiments.delete().where(self._experiments.c.name == name))
         except ExperimentNotFoundError:
             raise
         except SQLAlchemyError as exc:
@@ -450,17 +475,18 @@ class ExperimentPersistence:
 
     def reset_experiment(self, name: str) -> int:
         """
-        Truncate all tables in an experiment without deleting the schema.
+        Truncate all tables in the warehouse database for an experiment without deleting the schema.
         Returns the number of tables reset.
         Raises GenerationAlreadyRunningError if a generation is currently active.
         """
         try:
-            with self.engine.begin() as conn:
-                if not self._experiment_exists(conn, name):
+            # Check metadata and get table list
+            with self.engine.connect() as metadata_conn:
+                if not self._experiment_exists(metadata_conn, name):
                     raise ExperimentNotFoundError(f"Experiment '{name}' does not exist.")
 
                 # Check for concurrent generation runs (guard against reset during generation)
-                active_run = conn.execute(
+                active_run = metadata_conn.execute(
                     select(self._generation_runs.c.id, self._generation_runs.c.started_at).where(
                         (self._generation_runs.c.experiment_name == name)
                         & (self._generation_runs.c.status == GenerationStatus.RUNNING.value)
@@ -475,7 +501,7 @@ class ExperimentPersistence:
                     )
 
                 # Get all tables for this experiment
-                table_rows = conn.execute(
+                table_rows = metadata_conn.execute(
                     select(self._experiment_tables.c.table_name).where(
                         self._experiment_tables.c.experiment_name == name
                     )
@@ -484,11 +510,13 @@ class ExperimentPersistence:
                     self._physical_table_name(name, row.table_name) for row in table_rows
                 ]
 
-                inspector = inspect(conn)
-                reset_count = 0
+            # Truncate tables in warehouse database
+            inspector = inspect(self.warehouse_engine)
+            reset_count = 0
+            with self.warehouse_engine.begin() as warehouse_conn:
                 for table_name in physical_tables:
                     if inspector.has_table(table_name):
-                        conn.exec_driver_sql(f'DELETE FROM "{table_name}"')
+                        warehouse_conn.exec_driver_sql(f'DELETE FROM "{table_name}"')
                         reset_count += 1
 
         except (ExperimentNotFoundError, GenerationAlreadyRunningError):
@@ -500,11 +528,12 @@ class ExperimentPersistence:
 
     def execute_query(self, sql: str) -> QueryResult:
         """
-        Execute a SQL query and return the results.
+        Execute a SQL query against the warehouse database (Redshift/PostgreSQL).
         Raises QueryExecutionError if the query fails.
         """
         try:
-            with self.engine.connect() as conn:
+            # Execute query against warehouse database (where actual data lives)
+            with self.warehouse_engine.connect() as conn:
                 result = conn.execute(text(sql))
 
                 # Get column names from keys()
@@ -531,7 +560,7 @@ class ExperimentPersistence:
         parquet_files: list[str | Path],
     ) -> int:
         """
-        Load Parquet batches into the physical table backing an experiment table.
+        Load Parquet batches into the physical table in the warehouse database (Redshift/PostgreSQL).
 
         Returns the number of rows inserted. Raises DataLoadError for any
         validation or insertion failure.
@@ -548,13 +577,14 @@ class ExperimentPersistence:
             )
 
         try:
-            with self.engine.begin() as conn:
-                if not self._experiment_exists(conn, experiment_name):
+            # Check metadata in SQLite
+            with self.engine.connect() as metadata_conn:
+                if not self._experiment_exists(metadata_conn, experiment_name):
                     raise ExperimentNotFoundError(
                         f"Experiment '{experiment_name}' does not exist."
                     )
 
-                table_record = conn.execute(
+                table_record = metadata_conn.execute(
                     select(self._experiment_tables.c.table_name).where(
                         (self._experiment_tables.c.experiment_name == experiment_name)
                         & (self._experiment_tables.c.table_name == table_name)
@@ -566,16 +596,18 @@ class ExperimentPersistence:
                         f"Table '{table_name}' is not registered under experiment '{experiment_name}'."
                     )
 
-                physical_table = self._physical_table_name(experiment_name, table_name)
-                inspector = inspect(conn)
+            # Load data into warehouse database (Redshift/PostgreSQL)
+            physical_table = self._physical_table_name(experiment_name, table_name)
+            with self.warehouse_engine.begin() as warehouse_conn:
+                inspector = inspect(self.warehouse_engine)
                 if not inspector.has_table(physical_table):
                     raise DataLoadError(
                         f"Physical table '{physical_table}' does not exist in the warehouse."
                     )
 
-                target_table = Table(physical_table, MetaData(), autoload_with=conn)
+                target_table = Table(physical_table, MetaData(), autoload_with=self.warehouse_engine)
                 # Replace existing contents to mirror the latest Parquet export.
-                conn.execute(target_table.delete())
+                warehouse_conn.execute(target_table.delete())
 
                 total_rows = 0
                 for file_path in paths:
@@ -591,7 +623,7 @@ class ExperimentPersistence:
 
                     records = parquet_table.to_pylist()
                     try:
-                        conn.execute(target_table.insert(), records)
+                        warehouse_conn.execute(target_table.insert(), records)
                     except SQLAlchemyError as exc:
                         raise DataLoadError(
                             f"Failed to load Parquet file '{file_path}' into '{physical_table}': {exc}"
@@ -699,7 +731,12 @@ class ExperimentPersistence:
         return result is not None
 
     def _create_data_tables(self, schema: ExperimentSchema, conn: Connection) -> None:
-        inspector = inspect(conn)
+        """
+        Create physical data tables in the warehouse database (PostgreSQL/Redshift).
+        The conn parameter is from the metadata database but is kept for compatibility.
+        """
+        # Use warehouse engine for physical table creation
+        inspector = inspect(self.warehouse_engine)
         for table_schema in schema.tables:
             table_name = self._physical_table_name(schema.name, table_schema.name)
             if inspector.has_table(table_name):
@@ -718,7 +755,8 @@ class ExperimentPersistence:
                 for column_schema in table_schema.columns
             ]
             Table(table_name, metadata, *columns)
-            metadata.create_all(conn)
+            # Create table in warehouse database (Redshift/PostgreSQL)
+            metadata.create_all(self.warehouse_engine)
 
     @staticmethod
     def _physical_table_name(experiment_name: str, table_name: str) -> str:
