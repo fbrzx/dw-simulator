@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1
+# Test Runner Dockerfile - specialized for CI/CD testing
+FROM python:3.11-slim AS test-runner
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+# Install system dependencies needed for all warehouse types
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        postgresql-client \
+        netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY tests ./tests
+
+# Install Python dependencies (including dev dependencies for testing)
+RUN pip install --upgrade pip \
+    && pip install -e .[dev] \
+    && pip install pytest pytest-cov httpx pandas ruff
+
+# Create data directory for test artifacts
+RUN mkdir -p /data
+
+# Default command runs all tests
+CMD ["pytest", "-v", "--tb=short", "-o", "addopts=", "-p", "no:cov"]
