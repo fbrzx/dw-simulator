@@ -55,3 +55,28 @@ You **must** execute the following steps in strict numerical order for every cyc
 - Provide a concise summary of the actions taken and the current state to the user.
 
 - If repository access is available, push the successful changeset to a new `feat/[story-id]` branch before concluding the cycle.
+
+11. **DOCUMENTATION MAINTENANCE (Definition of Done):**
+
+- When marking a user story as COMPLETE, immediately move its full documentation from `docs/status.md` to `docs/complete.md`.
+
+- `docs/status.md` must ONLY contain:
+  - Current Status Summary (high-level metrics: test count, coverage, feature parity)
+  - "In Progress" section (active implementation tasks with detailed steps)
+  - "Backlog" section (future enhancements with priorities and acceptance criteria)
+  - Brief reference to `docs/complete.md` for historical context
+
+- `docs/complete.md` must contain:
+  - All completed user stories with full implementation details
+  - Acceptance criteria satisfaction status
+  - Test coverage metrics
+  - Historical context and lessons learned
+  - Timestamp of completion
+
+- This practice ensures:
+  - `docs/status.md` remains focused and concise (< 100 lines)
+  - Easy identification of current work vs. historical achievements
+  - Better readability for developers joining the project
+  - Clean separation between "what's done" and "what's next"
+
+- Execute this documentation cleanup at the end of **every recursion cycle** where a user story is marked complete.
