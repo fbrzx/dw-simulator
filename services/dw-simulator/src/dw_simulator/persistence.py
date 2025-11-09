@@ -251,6 +251,20 @@ class ExperimentPersistence:
         # Use default warehouse type
         return self.default_warehouse_type
 
+    def _get_sqlglot_dialect(self, warehouse_type: str | None) -> str | None:
+        """Map warehouse type to sqlglot dialect name."""
+        if not warehouse_type:
+            warehouse_type = self.default_warehouse_type
+
+        # Map warehouse types to sqlglot dialects
+        dialect_mapping = {
+            WarehouseType.SQLITE: "sqlite",
+            WarehouseType.REDSHIFT: "postgres",  # Redshift is PostgreSQL-compatible
+            WarehouseType.SNOWFLAKE: "snowflake",
+        }
+
+        return dialect_mapping.get(warehouse_type)
+
     # Public API -----------------------------------------------------------------
 
     def create_experiment(self, schema: ExperimentSchema) -> ExperimentMetadata:
@@ -677,22 +691,35 @@ class ExperimentPersistence:
             rewritten_sql = sql
             if experiment_name:
                 with self.engine.connect() as metadata_conn:
+                    # Get table mapping
                     table_rows = metadata_conn.execute(
                         select(self._experiment_tables.c.table_name).where(
                             self._experiment_tables.c.experiment_name == experiment_name
                         )
                     ).all()
 
+                    # Get warehouse type for dialect mapping
+                    warehouse_type_row = metadata_conn.execute(
+                        select(self._experiments.c.warehouse_type).where(
+                            self._experiments.c.name == experiment_name
+                        )
+                    ).first()
+
                 table_mapping = {
                     row.table_name: self._physical_table_name(experiment_name, row.table_name)
                     for row in table_rows
                 }
+
+                # Map warehouse type to sqlglot dialect
+                warehouse_type = warehouse_type_row.warehouse_type if warehouse_type_row else None
+                dialect = self._get_sqlglot_dialect(warehouse_type)
 
                 try:
                     rewritten_sql = rewrite_query_for_experiment(
                         sql=sql,
                         experiment_name=experiment_name,
                         table_mapping=table_mapping,
+                        dialect=dialect,
                     )
                 except QueryRewriteError as exc:
                     raise QueryExecutionError(str(exc)) from exc

@@ -12,10 +12,10 @@ SELECT
     SUM(oi.quantity * oi.unit_price) as items_total,
     o.total_amount as order_total,
     STRING_AGG(p.product_name, ', ') as products_ordered
-FROM ecommerce_simple__orders o
-JOIN ecommerce_simple__customers c ON o.customer_id = c.customer_id
-LEFT JOIN ecommerce_simple__order_items oi ON o.order_id = oi.order_id
-LEFT JOIN ecommerce_simple__products p ON oi.product_id = p.product_id
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+LEFT JOIN order_items oi ON o.order_id = oi.order_id
+LEFT JOIN products p ON oi.product_id = p.product_id
 GROUP BY
     o.order_id,
     o.order_date,

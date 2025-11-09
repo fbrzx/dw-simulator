@@ -1,5 +1,5 @@
 {
-  "name": "ecommerce_complete",
+  "name": "ecommerce",
   "description": "Complete e-commerce dataset with customers, products, orders, and order items. Demonstrates foreign key relationships, Faker rules, and realistic data generation.",
   "tables": [
     {

@@ -22,10 +22,10 @@ SELECT
         WHEN COUNT(DISTINCT eo.open_id) > 0 THEN 'Low Engagement'
         ELSE 'No Engagement'
     END as engagement_level
-FROM marketing_campaigns__subscribers s
-LEFT JOIN marketing_campaigns__email_sends es ON s.subscriber_id = es.subscriber_id
-LEFT JOIN marketing_campaigns__email_opens eo ON es.send_id = eo.send_id
-LEFT JOIN marketing_campaigns__email_clicks ec ON es.send_id = ec.send_id
+FROM subscribers s
+LEFT JOIN email_sends es ON s.subscriber_id = es.subscriber_id
+LEFT JOIN email_opens eo ON es.send_id = eo.send_id
+LEFT JOIN email_clicks ec ON es.send_id = ec.send_id
 WHERE s.is_subscribed = 1
 GROUP BY
     s.subscriber_id,

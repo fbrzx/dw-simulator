@@ -11,7 +11,7 @@ SELECT
     COUNT(DISTINCT CASE WHEN eo.user_agent LIKE '%Chrome%' THEN eo.send_id END) as chrome_opens,
     COUNT(DISTINCT CASE WHEN eo.user_agent LIKE '%Safari%' THEN eo.send_id END) as safari_opens,
     COUNT(DISTINCT CASE WHEN eo.user_agent LIKE '%Firefox%' THEN eo.send_id END) as firefox_opens
-FROM marketing_campaigns__email_opens eo
-LEFT JOIN marketing_campaigns__email_clicks ec ON eo.send_id = ec.send_id
+FROM email_opens eo
+LEFT JOIN email_clicks ec ON eo.send_id = ec.send_id
 GROUP BY eo.device_type
 ORDER BY total_opens DESC;

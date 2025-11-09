@@ -14,9 +14,9 @@ SELECT
     MIN(o.order_date) as first_order_date,
     MAX(o.order_date) as last_order_date,
     COUNT(DISTINCT oi.product_id) as unique_products_purchased
-FROM ecommerce_simple__customers c
-LEFT JOIN ecommerce_simple__orders o ON c.customer_id = o.customer_id
-LEFT JOIN ecommerce_simple__order_items oi ON o.order_id = oi.order_id
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id
+LEFT JOIN order_items oi ON o.order_id = oi.order_id
 GROUP BY
     c.customer_id,
     c.first_name,

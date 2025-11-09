@@ -1023,3 +1023,19 @@ def test_snowflake_copy_docstring_documents_limitations() -> None:
     # Verify it documents fallback behavior
     assert "Falls back to direct INSERT" in docstring
     assert "LocalStack Snowflake emulator" in docstring
+
+
+def test_get_sqlglot_dialect_maps_warehouse_types(tmp_path: Path) -> None:
+    """Test that warehouse types are correctly mapped to sqlglot dialects."""
+    from dw_simulator.schema import WarehouseType
+
+    persistence = create_persistence(tmp_path)
+
+    # Test each warehouse type mapping
+    assert persistence._get_sqlglot_dialect(WarehouseType.SQLITE) == "sqlite"
+    assert persistence._get_sqlglot_dialect(WarehouseType.REDSHIFT) == "postgres"
+    assert persistence._get_sqlglot_dialect(WarehouseType.SNOWFLAKE) == "snowflake"
+
+    # Test None defaults to default_warehouse_type
+    # Default is SQLITE when no other warehouses are configured
+    assert persistence._get_sqlglot_dialect(None) == "sqlite"

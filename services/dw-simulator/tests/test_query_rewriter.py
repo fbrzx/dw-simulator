@@ -113,3 +113,30 @@ def test_rewrite_applies_to_multiple_statements() -> None:
 
     assert rewritten.count("rl_dw__customers") == 1
     assert "rl_dw__orders" in rewritten
+
+
+def test_rewrite_preserves_postgres_string_agg() -> None:
+    """Test that PostgreSQL's STRING_AGG function is preserved with postgres dialect."""
+    sql = """
+        SELECT
+            o.order_id,
+            STRING_AGG(p.product_name, ', ') as products_ordered
+        FROM orders o
+        LEFT JOIN products p ON o.product_id = p.product_id
+        GROUP BY o.order_id
+    """
+    rewritten = rewrite_query_for_experiment(
+        sql,
+        experiment_name="ecommerce",
+        table_mapping={
+            "orders": "ecommerce__orders",
+            "products": "ecommerce__products",
+        },
+        dialect="postgres",
+    )
+
+    # Ensure STRING_AGG is preserved and not converted to GROUP_CONCAT
+    assert "STRING_AGG" in rewritten.upper()
+    assert "GROUP_CONCAT" not in rewritten.upper()
+    assert "ecommerce__orders" in rewritten
+    assert "ecommerce__products" in rewritten

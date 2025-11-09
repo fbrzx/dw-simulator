@@ -10,7 +10,7 @@ SELECT
     COUNT(o.order_id) as total_orders,
     SUM(o.total_amount) as total_revenue,
     AVG(CASE WHEN o.order_id IS NOT NULL THEN o.total_amount END) as avg_order_value
-FROM ecommerce_simple__customers c
-LEFT JOIN ecommerce_simple__orders o ON c.customer_id = o.customer_id
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id
 GROUP BY cohort_month
 ORDER BY cohort_month;
