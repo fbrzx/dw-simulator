@@ -244,7 +244,7 @@ class ExperimentGenerator:
         generator = {
             DataType.INT: self._generate_int,
             DataType.FLOAT: self._generate_float,
-            DataType.BOOLEAN: lambda: rng.random() < 0.5,
+            DataType.BOOLEAN: lambda col, r, f, n: r.random() < 0.5,
             DataType.DATE: self._generate_date,
             DataType.VARCHAR: self._generate_string,
         }.get(data_type)
