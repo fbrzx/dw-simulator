@@ -17,10 +17,10 @@ SELECT
     ROUND(100.0 * COUNT(DISTINCT eo.open_id) / NULLIF(COUNT(DISTINCT es.send_id), 0), 2) as open_rate,
     ROUND(100.0 * COUNT(DISTINCT ec.click_id) / NULLIF(COUNT(DISTINCT eo.open_id), 0), 2) as click_through_rate,
     ROUND(100.0 * COUNT(DISTINCT ec.click_id) / NULLIF(COUNT(DISTINCT es.send_id), 0), 2) as click_to_send_rate
-FROM marketing_campaigns__campaigns c
-LEFT JOIN marketing_campaigns__email_sends es ON c.campaign_id = es.campaign_id
-LEFT JOIN marketing_campaigns__email_opens eo ON es.send_id = eo.send_id
-LEFT JOIN marketing_campaigns__email_clicks ec ON es.send_id = ec.send_id
+FROM campaigns c
+LEFT JOIN email_sends es ON c.campaign_id = es.campaign_id
+LEFT JOIN email_opens eo ON es.send_id = eo.send_id
+LEFT JOIN email_clicks ec ON es.send_id = ec.send_id
 GROUP BY
     c.campaign_id,
     c.campaign_name,

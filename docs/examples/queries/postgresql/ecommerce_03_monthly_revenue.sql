@@ -9,7 +9,7 @@ SELECT
     SUM(o.total_amount) as total_revenue,
     AVG(o.total_amount) as avg_order_value,
     SUM(oi.quantity) as total_items_sold
-FROM ecommerce_simple__orders o
-LEFT JOIN ecommerce_simple__order_items oi ON o.order_id = oi.order_id
+FROM orders o
+LEFT JOIN order_items oi ON o.order_id = oi.order_id
 GROUP BY order_month
 ORDER BY order_month;

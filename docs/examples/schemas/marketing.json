@@ -1,5 +1,5 @@
 {
-  "name": "marketing_campaigns",
+  "name": "marketing",
   "description": "Marketing analytics dataset with campaigns, email sends, opens, and clicks. Demonstrates multi-level foreign key relationships and conversion funnel analysis.",
   "tables": [
     {
