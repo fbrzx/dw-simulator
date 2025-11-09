@@ -127,108 +127,37 @@ The dual-database architecture has been implemented and tested. The system now s
 - **UI enhancements:** The control panel now lists experiments, supports JSON schemas, SQL imports (Redshift/Snowflake), data generation, and experiment reset.
 - **Testing:** `cd services/dw-simulator && PYTHONPATH=src pytest tests/test_service.py -o addopts="" -p no:cov` (34 tests passing). Key suites include `tests/test_persistence.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, and `tests/test_generator.py`.
 
-## In Progress
-
-### US 6.2 – Foreign key relationship enforcement during generation (IN PROGRESS)
+### US 6.2 – Foreign key relationship enforcement during generation (✅ COMPLETE)
 
 **Goal:** Enable users to define foreign key relationships between tables, ensuring generated data maintains referential integrity (child table foreign keys reference valid primary keys from parent tables).
 
-**Implementation Plan:**
+**All steps completed:**
 
-**Step 1: Schema Model Extensions (✅ COMPLETE)**
-- ✅ Extended `ColumnSchema` with optional `foreign_key: ForeignKeyConfig` field
-- ✅ Implemented `ForeignKeyConfig` Pydantic model with full validation:
-  - Validates referenced table/column names as SQL identifiers
-  - Supports optional `nullable` field for NULL FK values
-- ✅ Added `TableSchema.foreign_keys` list to collect FK metadata from columns
-- ✅ Implemented `ExperimentSchema.validate_foreign_keys()` validator:
-  - Verifies referenced tables and columns exist
-  - Enforces that referenced columns are unique (primary keys)
-  - Detects circular FK dependencies via topological sort
-  - Allows nullable FKs to break cycles
-- ✅ Added 10 comprehensive unit tests covering:
-  - Valid FK relationships and multi-table chains
-  - Invalid references (non-existent table/column, non-unique column)
-  - Circular dependency detection and nullable FK cycle breaking
-  - Multiple FKs per table
-- ✅ Updated `docs/tech-spec.md` with comprehensive FK documentation:
-  - JSON schema examples with FK definitions
-  - Validation rules and generation behavior
-  - SQL import FK detection roadmap
-  - Multi-level FK chain example (customers → orders → order_items)
-- **Test Results:** All 209 tests passing, schema.py coverage at 95%
+1. **Schema Model Extensions (✅ COMPLETE):** Extended `ColumnSchema` with optional `foreign_key: ForeignKeyConfig` field. Implemented `ForeignKeyConfig` Pydantic model with full validation (validates referenced table/column names as SQL identifiers, supports optional `nullable` field for NULL FK values). Added `TableSchema.foreign_keys` list to collect FK metadata. Implemented `ExperimentSchema.validate_foreign_keys()` validator (verifies referenced tables/columns exist, enforces referenced columns are unique, detects circular FK dependencies via topological sort, allows nullable FKs to break cycles). Added 10 comprehensive unit tests covering valid FK relationships, invalid references, circular dependency detection, and multiple FKs per table. Updated `docs/tech-spec.md` with comprehensive FK documentation. Test Results: All 209 tests passing, schema.py coverage at 95%.
 
-**Step 2: SQL Import FK Detection (✅ COMPLETE)**
-- ✅ Extended SQL parser to detect both inline and table-level FK constraints:
-  - Inline REFERENCES: `customer_id INT REFERENCES customers(id)` (parsed as `exp.Reference`)
-  - Table-level: `FOREIGN KEY (customer_id) REFERENCES customers(id)` (parsed as `exp.ForeignKey`)
-- ✅ Implemented two parser functions:
-  - `_parse_reference_constraint()` for inline REFERENCES syntax
-  - `_parse_foreign_key_constraint()` for table-level FOREIGN KEY syntax
-- ✅ Both parsers extract `references_table` and `references_column` from sqlglot AST
-- ✅ FK information automatically mapped to `ColumnSchema.foreign_key` during SQL import
-- ✅ Multi-column FKs silently skipped (not yet supported)
-- ✅ Added 6 comprehensive unit tests covering:
-  - Inline FK detection (Redshift & Snowflake dialects)
-  - Table-level FK detection
-  - Multiple FKs in single table
-  - Multi-level FK chains (customers → orders → order_items)
-  - Tables without FKs
-- **Test Results:** All 215 tests passing, sql_importer.py coverage at 78%
-- **Note:** Warnings for unsupported FK features (ON DELETE/UPDATE) deferred to future enhancement
+2. **SQL Import FK Detection (✅ COMPLETE):** Extended SQL parser to detect both inline and table-level FK constraints (inline REFERENCES: `customer_id INT REFERENCES customers(id)`, table-level: `FOREIGN KEY (customer_id) REFERENCES customers(id)`). Implemented two parser functions: `_parse_reference_constraint()` for inline REFERENCES syntax and `_parse_foreign_key_constraint()` for table-level FOREIGN KEY syntax. FK information automatically mapped to `ColumnSchema.foreign_key` during SQL import. Added 6 comprehensive unit tests covering inline/table-level FK detection, multiple FKs, and multi-level FK chains. Test Results: All 215 tests passing, sql_importer.py coverage at 78%.
 
-**Step 3: Generator Referential Integrity (✅ COMPLETE)**
-- ✅ Implemented topological sort for FK dependency resolution:
-  - `_topological_sort_tables()` using Kahn's algorithm
-  - Generates parent tables before child tables
-  - Only enforces hard dependencies for required (non-nullable) FKs
-  - Nullable FKs don't create hard dependencies, allowing flexible ordering
-- ✅ Implemented FK value sampling from parent tables:
-  - `_generate_foreign_key_value()` samples from parent table's referenced column values
-  - Modified `_generate_table()` to track and return unique column values
-  - Modified `generate()` to maintain `generated_values` dict across tables
-  - Case-insensitive table name lookups for FK resolution
-- ✅ Implemented nullable FK handling:
-  - 10% NULL injection rate for nullable FKs (configurable via `rng.random() < 0.10`)
-  - Nullable detection checks both `column.required` and `fk_config.nullable` fields
-- ✅ Added deterministic seeding for FK relationships:
-  - FK value selection uses same `random.Random` instance as rest of generation
-  - Identical seeds produce identical FK relationships across runs
-- ✅ Added comprehensive error handling:
-  - Clear error messages when parent table not yet generated
-  - Validation that referenced columns have generated values
-  - Topological sort ensures generation order is always valid
-- ✅ Added 6 comprehensive unit tests:
-  - `test_generator_foreign_key_basic_relationship`: Basic FK sampling from parent table
-  - `test_generator_foreign_key_nullable`: NULL value injection for nullable FKs (~10% rate)
-  - `test_generator_foreign_key_multi_level_chain`: 3-level FK chain (regions → stores → sales)
-  - `test_generator_foreign_key_multiple_fks_in_one_table`: Table with multiple FK columns
-  - `test_generator_topological_sort_respects_dependencies`: Generation order verification
-  - `test_generator_foreign_key_deterministic_seeding`: Same seed produces identical relationships
-- **Test Results:** All 221 tests passing (2 skipped), generator.py coverage at 92% (up from 83%), overall coverage at 84%
+3. **Generator Referential Integrity (✅ COMPLETE):** Implemented topological sort for FK dependency resolution using Kahn's algorithm (generates parent tables before child tables, only enforces hard dependencies for required FKs, nullable FKs don't create hard dependencies). Implemented FK value sampling from parent tables with `_generate_foreign_key_value()`. Implemented nullable FK handling with 10% NULL injection rate for nullable FKs. Added deterministic seeding for FK relationships. Added comprehensive error handling with clear messages. Added 6 comprehensive unit tests for FK generation scenarios. Test Results: All 221 tests passing (2 skipped), generator.py coverage at 92%, overall coverage at 84%.
 
-**Step 4: Integration Testing & Documentation (P1 – IN PROGRESS)**
-- ❗ Create end-to-end test with a multi-table FK scenario (e.g., Customer → Order → OrderLine) and verify referential integrity via SQL JOINs.
-- ✅ CLI + Web UI already surface FK-aware generation (examples in README “Foreign Key Relationships” section).
-- ✅ README and docs now include JSON + SQL FK examples plus guidance on nullable FKs and dependency ordering.
-- ✅ Documented limitations (nullable FKs required to break cycles, multi-column FK import skipped) in README and tech spec.
+4. **Integration Testing & Documentation (✅ COMPLETE):** Created comprehensive end-to-end integration test (`test_e2e_foreign_key_referential_integrity`) with multi-table FK scenario (customers → orders → order_items). Test verifies complete workflow from experiment creation through data generation, loading, and querying. Test validates referential integrity via SQL JOINs (verifies all FK values reference existing parent keys, tests multi-level JOIN traversing entire FK chain, validates FK values are within parent table ranges). CLI + Web UI surface FK-aware generation with examples in README "Foreign Key Relationships" section. README and docs include JSON + SQL FK examples plus guidance on nullable FKs and dependency ordering. Documented limitations (nullable FKs required to break cycles, multi-column FK import skipped) in README and tech spec. Test Results: All 231 tests passing.
 
-**Acceptance Criteria:**
-- AC 1: Users can define FK relationships in JSON schemas with full validation
-- AC 2: SQL import detects and preserves FK constraints from DDL
-- AC 3: Generator produces data where all FK values reference existing parent keys
-- AC 4: Nullable FKs correctly introduce NULL values
-- AC 5: Generation fails gracefully with clear errors for circular or impossible FK constraints
-- AC 6: Comprehensive test coverage (unit + integration) validates FK enforcement
+**Acceptance Criteria:** All ACs satisfied.
+- AC 1: Users can define FK relationships in JSON schemas with full validation ✅
+- AC 2: SQL import detects and preserves FK constraints from DDL ✅
+- AC 3: Generator produces data where all FK values reference existing parent keys ✅
+- AC 4: Nullable FKs correctly introduce NULL values ✅
+- AC 5: Generation fails gracefully with clear errors for circular or impossible FK constraints ✅
+- AC 6: Comprehensive test coverage (unit + integration) validates FK enforcement ✅
 
-**Estimated Effort:** 3-4 days
-**Dependencies:** None (builds on existing schema/generator infrastructure)
-**Risk:** Complex FK graphs may require sophisticated dependency resolution
+**Test Coverage:** 231 tests passing, comprehensive unit and integration coverage across schema validation, SQL import, generator logic, and end-to-end workflows.
+
+## In Progress
+
+No active implementation tasks at this time. All planned user stories have been completed.
 
 ## Backlog
 
 ### Future Enhancements
-- **US 6.2:** Foreign key relationship enforcement during generation
 - **US 6.3:** Performance optimization for 10M+ row datasets
 - **US 6.4:** Data lineage tracking and visualization
 - **US 6.5:** Export experiments as Docker images for reproducibility
