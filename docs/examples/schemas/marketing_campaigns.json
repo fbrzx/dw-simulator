@@ -1,0 +1,232 @@
+{
+  "name": "marketing_campaigns",
+  "description": "Marketing analytics dataset with campaigns, email sends, opens, and clicks. Demonstrates multi-level foreign key relationships and conversion funnel analysis.",
+  "tables": [
+    {
+      "name": "campaigns",
+      "target_rows": 100,
+      "columns": [
+        {
+          "name": "campaign_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "campaign_name",
+          "data_type": "VARCHAR",
+          "varchar_length": 100,
+          "faker_rule": "catch_phrase"
+        },
+        {
+          "name": "campaign_type",
+          "data_type": "VARCHAR",
+          "varchar_length": 50
+        },
+        {
+          "name": "start_date",
+          "data_type": "DATE",
+          "date_start": "2024-01-01",
+          "date_end": "2024-06-30"
+        },
+        {
+          "name": "end_date",
+          "data_type": "DATE",
+          "date_start": "2024-07-01",
+          "date_end": "2024-12-31"
+        },
+        {
+          "name": "budget",
+          "data_type": "FLOAT",
+          "min_value": 1000.0,
+          "max_value": 100000.0
+        },
+        {
+          "name": "target_audience",
+          "data_type": "VARCHAR",
+          "varchar_length": 100
+        },
+        {
+          "name": "is_active",
+          "data_type": "BOOLEAN"
+        }
+      ]
+    },
+    {
+      "name": "subscribers",
+      "target_rows": 10000,
+      "columns": [
+        {
+          "name": "subscriber_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "email",
+          "data_type": "VARCHAR",
+          "varchar_length": 100,
+          "faker_rule": "email",
+          "required": true
+        },
+        {
+          "name": "first_name",
+          "data_type": "VARCHAR",
+          "varchar_length": 50,
+          "faker_rule": "first_name"
+        },
+        {
+          "name": "last_name",
+          "data_type": "VARCHAR",
+          "varchar_length": 50,
+          "faker_rule": "last_name"
+        },
+        {
+          "name": "company",
+          "data_type": "VARCHAR",
+          "varchar_length": 100,
+          "faker_rule": "company"
+        },
+        {
+          "name": "job_title",
+          "data_type": "VARCHAR",
+          "varchar_length": 100,
+          "faker_rule": "job"
+        },
+        {
+          "name": "subscription_date",
+          "data_type": "DATE",
+          "date_start": "2023-01-01",
+          "date_end": "2024-12-31"
+        },
+        {
+          "name": "is_subscribed",
+          "data_type": "BOOLEAN"
+        }
+      ]
+    },
+    {
+      "name": "email_sends",
+      "target_rows": 50000,
+      "columns": [
+        {
+          "name": "send_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "campaign_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "campaigns",
+            "references_column": "campaign_id"
+          }
+        },
+        {
+          "name": "subscriber_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "subscribers",
+            "references_column": "subscriber_id"
+          }
+        },
+        {
+          "name": "send_date",
+          "data_type": "DATE",
+          "date_start": "2024-01-01",
+          "date_end": "2024-12-31"
+        },
+        {
+          "name": "delivered",
+          "data_type": "BOOLEAN"
+        },
+        {
+          "name": "bounce_type",
+          "data_type": "VARCHAR",
+          "varchar_length": 20,
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "email_opens",
+      "target_rows": 25000,
+      "columns": [
+        {
+          "name": "open_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "send_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "email_sends",
+            "references_column": "send_id"
+          }
+        },
+        {
+          "name": "open_date",
+          "data_type": "DATE",
+          "date_start": "2024-01-01",
+          "date_end": "2024-12-31"
+        },
+        {
+          "name": "device_type",
+          "data_type": "VARCHAR",
+          "varchar_length": 20
+        },
+        {
+          "name": "user_agent",
+          "data_type": "VARCHAR",
+          "varchar_length": 200,
+          "faker_rule": "user_agent"
+        }
+      ]
+    },
+    {
+      "name": "email_clicks",
+      "target_rows": 15000,
+      "columns": [
+        {
+          "name": "click_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "send_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "email_sends",
+            "references_column": "send_id"
+          }
+        },
+        {
+          "name": "click_date",
+          "data_type": "DATE",
+          "date_start": "2024-01-01",
+          "date_end": "2024-12-31"
+        },
+        {
+          "name": "link_url",
+          "data_type": "VARCHAR",
+          "varchar_length": 200,
+          "faker_rule": "url"
+        },
+        {
+          "name": "link_position",
+          "data_type": "INT",
+          "min_value": 1,
+          "max_value": 10
+        }
+      ]
+    }
+  ]
+}
