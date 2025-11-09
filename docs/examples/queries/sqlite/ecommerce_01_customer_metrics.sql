@@ -7,9 +7,7 @@ SELECT
     c.last_name,
     c.email,
     c.city,
-    c.country,
     c.signup_date,
-    c.loyalty_points,
     COUNT(DISTINCT o.order_id) as total_orders,
     SUM(o.total_amount) as lifetime_value,
     AVG(o.total_amount) as avg_order_value,
@@ -25,9 +23,7 @@ GROUP BY
     c.last_name,
     c.email,
     c.city,
-    c.country,
-    c.signup_date,
-    c.loyalty_points
+    c.signup_date
 HAVING total_orders > 0
 ORDER BY lifetime_value DESC
 LIMIT 100;
