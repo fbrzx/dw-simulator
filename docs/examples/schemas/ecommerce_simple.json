@@ -1,0 +1,151 @@
+{
+  "name": "ecommerce_simple",
+  "description": "Simplified e-commerce dataset with customers, products, orders, and order items. Demonstrates foreign key relationships, Faker rules, and realistic data generation.",
+  "tables": [
+    {
+      "name": "customers",
+      "target_rows": 200,
+      "columns": [
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "email",
+          "data_type": "VARCHAR",
+          "varchar_length": 100,
+          "faker_rule": "email"
+        },
+        {
+          "name": "first_name",
+          "data_type": "VARCHAR",
+          "varchar_length": 50,
+          "faker_rule": "first_name"
+        },
+        {
+          "name": "last_name",
+          "data_type": "VARCHAR",
+          "varchar_length": 50,
+          "faker_rule": "last_name"
+        },
+        {
+          "name": "city",
+          "data_type": "VARCHAR",
+          "varchar_length": 50,
+          "faker_rule": "city"
+        },
+        {
+          "name": "signup_date",
+          "data_type": "DATE",
+          "date_start": "2023-01-01",
+          "date_end": "2024-12-31"
+        }
+      ]
+    },
+    {
+      "name": "products",
+      "target_rows": 100,
+      "columns": [
+        {
+          "name": "product_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "product_name",
+          "data_type": "VARCHAR",
+          "varchar_length": 100
+        },
+        {
+          "name": "category",
+          "data_type": "VARCHAR",
+          "varchar_length": 50
+        },
+        {
+          "name": "price",
+          "data_type": "FLOAT",
+          "min_value": 9.99,
+          "max_value": 999.99
+        }
+      ]
+    },
+    {
+      "name": "orders",
+      "target_rows": 500,
+      "columns": [
+        {
+          "name": "order_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "customers",
+            "references_column": "customer_id"
+          }
+        },
+        {
+          "name": "order_date",
+          "data_type": "DATE",
+          "date_start": "2023-01-01",
+          "date_end": "2024-12-31"
+        },
+        {
+          "name": "total_amount",
+          "data_type": "FLOAT",
+          "min_value": 10.0,
+          "max_value": 5000.0
+        }
+      ]
+    },
+    {
+      "name": "order_items",
+      "target_rows": 1500,
+      "columns": [
+        {
+          "name": "item_id",
+          "data_type": "INT",
+          "is_unique": true,
+          "required": true
+        },
+        {
+          "name": "order_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "orders",
+            "references_column": "order_id"
+          }
+        },
+        {
+          "name": "product_id",
+          "data_type": "INT",
+          "required": true,
+          "foreign_key": {
+            "references_table": "products",
+            "references_column": "product_id"
+          }
+        },
+        {
+          "name": "quantity",
+          "data_type": "INT",
+          "min_value": 1,
+          "max_value": 10
+        },
+        {
+          "name": "unit_price",
+          "data_type": "FLOAT",
+          "min_value": 9.99,
+          "max_value": 999.99
+        }
+      ]
+    }
+  ]
+}
