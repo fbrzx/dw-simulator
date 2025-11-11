@@ -18,9 +18,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy project files
-COPY pyproject.toml README.md ./
-COPY src ./src
-COPY tests ./tests
+COPY services/dw-simulator/pyproject.toml services/dw-simulator/README.md ./
+COPY services/dw-simulator/src ./src
+COPY services/dw-simulator/tests ./tests
+COPY docs /docs
 
 # Install Python dependencies (including dev dependencies for testing)
 RUN pip install --upgrade pip \
