@@ -1,0 +1,327 @@
+{
+    "name": "data_container",
+    "description": "A Data Container schema for faster testing and development (20K rows)",
+    "tables": [
+        {
+            "name": "clickstream_aggregate_vw",
+            "target_rows": 5000,
+            "columns": [
+                {
+                    "name": "gcd_customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "is_unique": false,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "gcd_household_id",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "fyr",
+                    "data_type": "INT",
+                    "min_value": 2000,
+                    "max_value": 2050
+                },
+                {
+                    "name": "fmwk",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 53
+                },
+                {
+                    "name": "mstr_customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "visitor_id",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 512
+                },
+                {
+                    "name": "total_visits",
+                    "data_type": "INT"
+                },
+                {
+                    "name": "avg_total_pv_visits",
+                    "data_type": "FLOAT",
+                    "min_value": 0.0,
+                    "max_value": 1000.0
+                }
+            ]
+        },
+        {
+            "name": "currency_exchange_tb",
+            "target_rows": 192,
+            "columns": [
+                {
+                    "name": "fiscal_year",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 2000,
+                    "max_value": 2050
+                },
+                {
+                    "name": "year",
+                    "data_type": "INT",
+                    "min_value": 2000,
+                    "max_value": 2050
+                },
+                {
+                    "name": "month",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 10
+                },
+                {
+                    "name": "euro",
+                    "data_type": "FLOAT",
+                    "min_value": 0.0,
+                    "max_value": 10.0
+                },
+                {
+                    "name": "pound",
+                    "data_type": "FLOAT",
+                    "min_value": 0.0,
+                    "max_value": 10.0
+                }
+            ]
+        },
+        {
+            "name": "sas_calendar",
+            "target_rows": 1095,
+            "columns": [
+                {
+                    "name": "exact_day_dt",
+                    "data_type": "DATE",
+                    "required": true,
+                    "is_unique": true,
+                    "date_start": "2022-01-01",
+                    "date_end": "2024-12-31"
+                },
+                {
+                    "name": "calendar_year",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 2000,
+                    "max_value": 2050
+                },
+                {
+                    "name": "calendar_month",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 12
+                },
+                {
+                    "name": "fyr",
+                    "data_type": "INT",
+                    "min_value": 2000,
+                    "max_value": 2050
+                },
+                {
+                    "name": "fmm",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 12
+                },
+                {
+                    "name": "cycq",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 42
+                }
+            ]
+        },
+        {
+            "name": "sas_customer_mstr_vw",
+            "target_rows": 2000,
+            "columns": [
+                {
+                    "name": "customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "household_id",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "mstr_customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "mstr_household_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "birth_mmdd",
+                    "data_type": "INT",
+                    "min_value": 101,
+                    "max_value": 1231
+                },
+                {
+                    "name": "bu_purchased",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 240
+                },
+                {
+                    "name": "m0_12_net",
+                    "data_type": "FLOAT",
+                    "min_value": -100000.0,
+                    "max_value": 100000.0
+                },
+                {
+                    "name": "lifetime_cust_profit",
+                    "data_type": "FLOAT",
+                    "min_value": -100000.0,
+                    "max_value": 500000.0
+                }
+            ]
+        },
+        {
+            "name": "sas_transaction_vw",
+            "target_rows": 10000,
+            "columns": [
+                {
+                    "name": "transaction_no",
+                    "data_type": "INT",
+                    "required": true,
+                    "is_unique": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "household_id",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "mstr_customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "amount",
+                    "data_type": "FLOAT",
+                    "min_value": -10000.0,
+                    "max_value": 50000.0
+                },
+                {
+                    "name": "business_unit",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 100
+                },
+                {
+                    "name": "sku",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 800
+                },
+                {
+                    "name": "transaction_date",
+                    "data_type": "DATE",
+                    "required": true
+                },
+                {
+                    "name": "sales_associate",
+                    "data_type": "FLOAT",
+                    "min_value": 0.0,
+                    "max_value": 1000000.0
+                }
+            ]
+        },
+        {
+            "name": "sas_lookup_vw",
+            "target_rows": 500,
+            "columns": [
+                {
+                    "name": "code_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 32767
+                },
+                {
+                    "name": "code",
+                    "data_type": "INT",
+                    "required": true
+                },
+                {
+                    "name": "code_description",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 60,
+                    "required": true
+                },
+                {
+                    "name": "description",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 200
+                },
+                {
+                    "name": "parent_code_1",
+                    "data_type": "INT",
+                    "min_value": 1,
+                    "max_value": 32767
+                }
+            ]
+        },
+        {
+            "name": "sas_email_addresses_vw",
+            "target_rows": 1500,
+            "columns": [
+                {
+                    "name": "customer_id",
+                    "data_type": "INT",
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "email_id",
+                    "data_type": "INT",
+                    "is_unique": true,
+                    "required": true,
+                    "min_value": 1,
+                    "max_value": 999999999
+                },
+                {
+                    "name": "email_address",
+                    "data_type": "VARCHAR",
+                    "varchar_length": 200
+                },
+                {
+                    "name": "opt_in_date",
+                    "data_type": "DATE"
+                },
+                {
+                    "name": "opt_out_date",
+                    "data_type": "DATE"
+                }
+            ]
+        }
+    ]
+}

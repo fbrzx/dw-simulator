@@ -88,8 +88,12 @@ class ExperimentGenerator:
 
         for table_schema in sorted_tables:
             target_rows = overrides.get(table_schema.name.lower(), table_schema.target_rows)
-            if target_rows <= 0:
-                raise GenerationError(f"Target rows for table '{table_schema.name}' must be > 0.")
+            if target_rows < 0:
+                raise GenerationError(f"Target rows for table '{table_schema.name}' must be >= 0.")
+
+            # Skip generation for tables with target_rows = 0 (allows referencing existing data)
+            if target_rows == 0:
+                continue
 
             table_dir = output_dir / table_schema.name
             table_dir.mkdir(parents=True, exist_ok=True)
@@ -358,6 +362,21 @@ class ExperimentGenerator:
         delta_days = (end - start).days
         if delta_days <= 0:
             return start
+
+        # For unique date columns, generate sequentially to avoid collisions
+        if column_schema.is_unique:
+            next_value = next_unique_int[column_schema.name]
+            next_unique_int[column_schema.name] += 1
+            # Ensure we don't exceed the date range
+            if next_value > delta_days:
+                raise GenerationError(
+                    f"Unable to generate unique date for column '{column_schema.name}': "
+                    f"requested more unique dates than available in date range "
+                    f"({delta_days + 1} days from {start} to {end})."
+                )
+            return start + timedelta(days=next_value)
+
+        # For non-unique dates, use random sampling
         offset = rng.randint(0, delta_days)
         return start + timedelta(days=offset)
 

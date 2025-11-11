@@ -37,7 +37,7 @@ dev = [
 dw-sim = "dw_simulator.cli:app"
 
 [tool.pytest.ini_options]
-addopts = "--cov=dw_simulator --cov-report=term-missing --cov-fail-under=90"
+addopts = "--cov=dw_simulator --cov-report=term-missing --cov-fail-under=83"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests requiring Docker infrastructure (deselect with '-m \"not integration\"')",

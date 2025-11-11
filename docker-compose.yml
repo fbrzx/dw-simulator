@@ -2,8 +2,8 @@ services:
   # Test Runner - specialized service for CI/CD testing
   test-runner:
     build:
-      context: ./services/dw-simulator
-      dockerfile: Dockerfile.test
+      context: .
+      dockerfile: ./services/dw-simulator/Dockerfile.test
     image: dw-simulator/test-runner:latest
     environment:
       PYTHONPATH: /app/src

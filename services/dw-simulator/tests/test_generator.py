@@ -994,3 +994,97 @@ def test_generator_foreign_key_deterministic_seeding(tmp_path: Path) -> None:
     fk_values2 = posts2.column("user_id").to_pylist()
 
     assert fk_values1 == fk_values2, "FK generation should be deterministic with same seed"
+
+
+def test_generator_skip_table_with_target_rows_zero(tmp_path: Path) -> None:
+    """
+    Test that tables with target_rows=0 are skipped during generation.
+    This allows referencing existing data from previous experiments.
+    """
+    schema = ExperimentSchema(
+        name="skip_table_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="existing_table",
+                target_rows=0,  # Skip generation for this table
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="new_table",
+                target_rows=10,  # Generate data for this table
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="value", data_type="INT", min_value=1, max_value=100),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=42),
+    )
+
+    # Verify only one table was generated (new_table)
+    assert len(result.tables) == 1
+    assert result.tables[0].table_name == "new_table"
+    assert result.tables[0].row_count == 10
+
+    # Verify existing_table directory was not created
+    existing_table_dir = result.output_dir / "existing_table"
+    assert not existing_table_dir.exists()
+
+    # Verify new_table was generated correctly
+    new_table_dir = result.output_dir / "new_table"
+    assert new_table_dir.exists()
+    assert len(result.tables[0].files) > 0
+
+
+def test_generator_override_to_zero_rows(tmp_path: Path) -> None:
+    """
+    Test that row_overrides can be used to set target_rows to 0,
+    skipping generation for a table at runtime.
+    """
+    schema = ExperimentSchema(
+        name="override_zero_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="table_a",
+                target_rows=50,  # Schema says generate 50 rows
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                ],
+            ),
+            TableSchema(
+                name="table_b",
+                target_rows=20,
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100)
+    result = generator.generate(
+        GenerationRequest(
+            schema=schema,
+            output_root=tmp_path / "out",
+            row_overrides={"table_a": 0},  # Override to skip table_a
+            seed=123,
+        ),
+    )
+
+    # Verify only table_b was generated
+    assert len(result.tables) == 1
+    assert result.tables[0].table_name == "table_b"
+    assert result.tables[0].row_count == 20
+
+    # Verify table_a was skipped
+    table_a_dir = result.output_dir / "table_a"
+    assert not table_a_dir.exists()
