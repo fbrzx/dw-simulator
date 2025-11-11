@@ -480,7 +480,7 @@ const openGenerateModal = async (name) => {
           id="rows-${table.name}"
           name="${table.name}"
           placeholder="${table.target_rows}"
-          min="1"
+          min="0"
         />
       </div>
     `).join('');
@@ -513,8 +513,12 @@ const generateData = async (event) => {
   const rowInputs = tableOverridesEl.querySelectorAll('input[type="number"]');
   const rows = {};
   rowInputs.forEach(input => {
-    if (input.value && input.value.trim() !== '') {
-      rows[input.name] = parseInt(input.value, 10);
+    if (input.value !== null && input.value.trim() !== '') {
+      const value = parseInt(input.value, 10);
+      // Allow 0 or positive values (0 means skip generation for that table)
+      if (!isNaN(value) && value >= 0) {
+        rows[input.name] = value;
+      }
     }
   });
 

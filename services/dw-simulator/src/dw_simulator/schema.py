@@ -230,7 +230,7 @@ class TableSchema(BaseModel):
     """Table definition covering name, row counts, and column declarations."""
 
     name: str = Field(..., description="Table name.")
-    target_rows: int = Field(..., gt=0, description="Desired rows for the generator to create.")
+    target_rows: int = Field(..., ge=0, description="Desired rows for the generator to create. Set to 0 to skip generation and reference existing data.")
     columns: Sequence[ColumnSchema] = Field(..., min_length=1)
     composite_keys: list[list[str]] | None = Field(
         default=None,
