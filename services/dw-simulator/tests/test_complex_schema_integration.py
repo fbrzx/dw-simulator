@@ -27,7 +27,7 @@ from dw_simulator.schema import ExperimentSchema
 @pytest.fixture
 def complex_schema() -> ExperimentSchema:
     """Load the complex.json schema."""
-    schema_path = Path(__file__).parent.parent.parent.parent / "docs" / "examples" / "schemas" / "complex.json"
+    schema_path = Path(__file__).parent.parent.parent.parent / "docs" / "examples" / "schemas" / "data_container.json"
     with open(schema_path, "r") as f:
         schema_data = json.load(f)
     return ExperimentSchema.model_validate(schema_data)

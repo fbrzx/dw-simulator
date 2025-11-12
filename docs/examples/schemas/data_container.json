@@ -1,10 +1,10 @@
 {
     "name": "data_container",
-    "description": "A Data Container schema for faster testing and development (20K rows)",
+    "description": "Data Container simple schema",
     "tables": [
         {
             "name": "clickstream_aggregate_vw",
-            "target_rows": 5000,
+            "target_rows": 25000,
             "columns": [
                 {
                     "name": "gcd_customer_id",
@@ -12,13 +12,13 @@
                     "required": true,
                     "is_unique": false,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "gcd_household_id",
                     "data_type": "INT",
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "fyr",
@@ -37,7 +37,7 @@
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "visitor_id",
@@ -65,30 +65,31 @@
                     "data_type": "INT",
                     "required": true,
                     "min_value": 2000,
-                    "max_value": 2050
+                    "max_value": 2025
                 },
                 {
                     "name": "year",
                     "data_type": "INT",
                     "min_value": 2000,
-                    "max_value": 2050
+                    "max_value": 2025
                 },
                 {
                     "name": "month",
                     "data_type": "VARCHAR",
-                    "varchar_length": 10
+                    "varchar_length": 10,
+                    "faker_rule": "month"
                 },
                 {
                     "name": "euro",
                     "data_type": "FLOAT",
-                    "min_value": 0.0,
-                    "max_value": 10.0
+                    "min_value": 0.8,
+                    "max_value": 0.9
                 },
                 {
                     "name": "pound",
                     "data_type": "FLOAT",
-                    "min_value": 0.0,
-                    "max_value": 10.0
+                    "min_value": 0.7,
+                    "max_value": 0.75
                 }
             ]
         },
@@ -145,33 +146,33 @@
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "household_id",
                     "data_type": "INT",
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "mstr_customer_id",
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "mstr_household_id",
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "birth_mmdd",
                     "data_type": "INT",
-                    "min_value": 101,
-                    "max_value": 1231
+                    "min_value": 11,
+                    "max_value": 3012
                 },
                 {
                     "name": "bu_purchased",
@@ -181,13 +182,13 @@
                 {
                     "name": "m0_12_net",
                     "data_type": "FLOAT",
-                    "min_value": -100000.0,
+                    "min_value": 0,
                     "max_value": 100000.0
                 },
                 {
                     "name": "lifetime_cust_profit",
                     "data_type": "FLOAT",
-                    "min_value": -100000.0,
+                    "min_value": 0,
                     "max_value": 500000.0
                 }
             ]
@@ -209,26 +210,26 @@
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "household_id",
                     "data_type": "INT",
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "mstr_customer_id",
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "amount",
                     "data_type": "FLOAT",
-                    "min_value": -10000.0,
-                    "max_value": 50000.0
+                    "min_value": 30,
+                    "max_value": 1200.0
                 },
                 {
                     "name": "business_unit",
@@ -244,7 +245,9 @@
                 {
                     "name": "transaction_date",
                     "data_type": "DATE",
-                    "required": true
+                    "required": true,
+                    "expected_start": "2022-01-01",
+                    "expected_end": "2024-12-31"
                 },
                 {
                     "name": "sales_associate",
@@ -311,15 +314,20 @@
                 {
                     "name": "email_address",
                     "data_type": "VARCHAR",
-                    "varchar_length": 200
+                    "varchar_length": 200,
+                    "faker_rule": "email"
                 },
                 {
                     "name": "opt_in_date",
-                    "data_type": "DATE"
+                    "data_type": "DATE",
+                    "expected_start": "2022-01-01",
+                    "expected_end": "2024-12-31"
                 },
                 {
                     "name": "opt_out_date",
-                    "data_type": "DATE"
+                    "data_type": "DATE",
+                    "expected_start": "2022-01-01",
+                    "expected_end": "2024-12-31"
                 }
             ]
         }
