@@ -58,7 +58,7 @@
         },
         {
             "name": "currency_exchange_tb",
-            "target_rows": 192,
+            "target_rows": 20,
             "columns": [
                 {
                     "name": "fiscal_year",
@@ -95,7 +95,7 @@
         },
         {
             "name": "sas_calendar",
-            "target_rows": 1095,
+            "target_rows": 100,
             "columns": [
                 {
                     "name": "exact_day_dt",
@@ -301,7 +301,7 @@
                     "data_type": "INT",
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "email_id",
@@ -309,7 +309,7 @@
                     "is_unique": true,
                     "required": true,
                     "min_value": 1,
-                    "max_value": 999999999
+                    "max_value": 5000
                 },
                 {
                     "name": "email_address",
