@@ -1330,6 +1330,11 @@ class ExperimentPersistence:
 
     def build_lineage_graph(self, experiment_name: str) -> LineageGraph:
         """Build an in-memory lineage graph from stored relationships."""
+        # Verify experiment exists
+        with self.engine.connect() as conn:
+            if not self._experiment_exists(conn, experiment_name):
+                raise ExperimentNotFoundError(f"Experiment '{experiment_name}' does not exist.")
+
         relationships = self.get_lineage_relationships(experiment_name)
 
         # Build node map (unique table names)
