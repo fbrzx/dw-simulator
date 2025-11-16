@@ -10,6 +10,8 @@ US 2.1 without pulling in the heavier SDV stack yet.
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 import random
 import time
 from collections import defaultdict
@@ -58,12 +60,263 @@ class GenerationRequest:
     seed: int | None = None
 
 
+@dataclass(frozen=True)
+class BatchGenerationTask:
+    """Task for generating a single batch of rows."""
+    table_schema: TableSchema
+    batch_index: int
+    batch_size: int
+    output_path: Path
+    seed: int
+    faker_locale: str
+    generated_values: dict[str, dict[str, list[Any]]]
+    # For unique columns, pass the starting index for this batch
+    unique_int_offsets: dict[str, int]
+
+
+@dataclass(frozen=True)
+class BatchGenerationResult:
+    """Result from generating a single batch."""
+    batch_index: int
+    output_path: Path
+    unique_column_values: dict[str, list[Any]]
+
+
+def _generate_batch_worker(task: BatchGenerationTask) -> BatchGenerationResult:
+    """
+    Worker function for parallel batch generation.
+
+    This is a module-level function (not a method) so it can be pickled
+    for multiprocessing.
+    """
+    # Create fresh RNG and Faker instances for this batch with deterministic seed
+    rng = random.Random(task.seed)
+    faker = Faker(task.faker_locale)
+    faker.seed_instance(task.seed)
+
+    # Track unique values generated in this batch
+    unique_values: dict[str, set[Any]] = defaultdict(set)
+    next_unique_int: dict[str, int] = dict(task.unique_int_offsets)
+    unique_column_values: dict[str, list[Any]] = {}
+
+    records: list[dict[str, Any]] = []
+    for _ in range(task.batch_size):
+        row: dict[str, Any] = {}
+        for column_schema in task.table_schema.columns:
+            value = _generate_value_worker(
+                column_schema=column_schema,
+                table_schema=task.table_schema,
+                rng=rng,
+                faker=faker,
+                unique_values=unique_values,
+                next_unique_int=next_unique_int,
+                generated_values=task.generated_values,
+            )
+            row[column_schema.name] = value
+
+            # Track unique column values for FK referencing
+            if column_schema.is_unique and value is not None:
+                if column_schema.name not in unique_column_values:
+                    unique_column_values[column_schema.name] = []
+                unique_column_values[column_schema.name].append(value)
+
+        records.append(row)
+
+    # Write Parquet file
+    table = pa.Table.from_pylist(records)
+    pq.write_table(table, task.output_path, compression="snappy")
+
+    return BatchGenerationResult(
+        batch_index=task.batch_index,
+        output_path=task.output_path,
+        unique_column_values=unique_column_values,
+    )
+
+
+def _generate_value_worker(
+    column_schema: ColumnSchema,
+    table_schema: TableSchema,
+    rng: random.Random,
+    faker: Faker,
+    unique_values: dict[str, set[Any]],
+    next_unique_int: dict[str, int],
+    generated_values: dict[str, dict[str, list[Any]]],
+) -> Any:
+    """
+    Generate a single value for a column (worker version).
+
+    This is a simplified version of _generate_value that can be used in worker processes.
+    """
+    # Handle FK columns by sampling from parent table
+    if column_schema.foreign_key is not None:
+        fk_config = column_schema.foreign_key
+        is_nullable = (not column_schema.required) or (fk_config.nullable is True)
+
+        # Nullable FKs have 10% chance of being NULL
+        if is_nullable and rng.random() < 0.10:
+            return None
+
+        # Get parent table's generated values
+        ref_table = fk_config.references_table.lower()
+        ref_column = fk_config.references_column
+
+        if ref_table not in generated_values:
+            raise GenerationError(
+                f"Table '{table_schema.name}' column '{column_schema.name}' references table '{fk_config.references_table}', "
+                f"but that table has not been generated yet."
+            )
+
+        parent_values = generated_values[ref_table].get(ref_column)
+        if not parent_values:
+            raise GenerationError(
+                f"Table '{table_schema.name}' column '{column_schema.name}' references "
+                f"'{ref_table}.{ref_column}', but no values were generated for that column."
+            )
+
+        return rng.choice(parent_values)
+
+    # Handle nullable columns
+    if not column_schema.required and rng.random() < 0.05:
+        return None
+
+    # Generate value based on data type
+    data_type = column_schema.data_type
+
+    if data_type == DataType.INT:
+        if column_schema.is_unique:
+            value = next_unique_int[column_schema.name]
+            next_unique_int[column_schema.name] += 1
+            return value
+
+        if column_schema.distribution is not None:
+            config = column_schema.distribution
+            low = int(column_schema.min_value) if column_schema.min_value is not None else 0
+            high = int(column_schema.max_value) if column_schema.max_value is not None else 1_000_000
+
+            if config.type == DistributionType.NORMAL:
+                sample = rng.gauss(config.parameters["mean"], config.parameters["stddev"])
+            elif config.type == DistributionType.EXPONENTIAL:
+                sample = rng.expovariate(config.parameters["lambda"])
+            elif config.type == DistributionType.BETA:
+                beta_value = rng.betavariate(config.parameters["alpha"], config.parameters["beta"])
+                sample = low + (high - low) * beta_value
+            else:
+                sample = rng.randint(low, high)
+
+            sample = max(low, min(high, sample))
+            return int(round(sample))
+
+        low = int(column_schema.min_value) if column_schema.min_value is not None else 0
+        high = int(column_schema.max_value) if column_schema.max_value is not None else 1_000_000
+        return rng.randint(low, high)
+
+    elif data_type == DataType.FLOAT:
+        if column_schema.is_unique:
+            value = float(next_unique_int[column_schema.name])
+            next_unique_int[column_schema.name] += 1
+            return value
+
+        if column_schema.distribution is not None:
+            config = column_schema.distribution
+            low = column_schema.min_value if column_schema.min_value is not None else 0.0
+            high = column_schema.max_value if column_schema.max_value is not None else 1_000_000.0
+
+            if config.type == DistributionType.NORMAL:
+                sample = rng.gauss(config.parameters["mean"], config.parameters["stddev"])
+            elif config.type == DistributionType.EXPONENTIAL:
+                sample = rng.expovariate(config.parameters["lambda"])
+            elif config.type == DistributionType.BETA:
+                beta_value = rng.betavariate(config.parameters["alpha"], config.parameters["beta"])
+                sample = low + (high - low) * beta_value
+            else:
+                sample = rng.uniform(low, high)
+
+            return max(low, min(high, sample))
+
+        low = column_schema.min_value if column_schema.min_value is not None else 0.0
+        high = column_schema.max_value if column_schema.max_value is not None else 1_000_000.0
+        return rng.uniform(low, high)
+
+    elif data_type == DataType.BOOLEAN:
+        return rng.random() < 0.5
+
+    elif data_type == DataType.DATE:
+        start = column_schema.date_start or date(2020, 1, 1)
+        end = column_schema.date_end or date(2025, 12, 31)
+        delta_days = (end - start).days
+
+        if delta_days <= 0:
+            return start
+
+        if column_schema.is_unique:
+            next_value = next_unique_int[column_schema.name]
+            next_unique_int[column_schema.name] += 1
+            if next_value > delta_days:
+                raise GenerationError(
+                    f"Unable to generate unique date for column '{column_schema.name}': "
+                    f"requested more unique dates than available in date range."
+                )
+            return start + timedelta(days=next_value)
+
+        offset = rng.randint(0, delta_days)
+        return start + timedelta(days=offset)
+
+    elif data_type == DataType.VARCHAR:
+        max_length = column_schema.varchar_length or 255
+        if column_schema.faker_rule:
+            target = faker
+            for part in column_schema.faker_rule.split("."):
+                if not hasattr(target, part):
+                    raise GenerationError(f"Invalid Faker rule '{column_schema.faker_rule}'.")
+                target = getattr(target, part)
+            if callable(target):
+                value = str(target())
+            else:
+                value = str(target)
+        else:
+            value = faker.word()
+
+        if len(value) > max_length:
+            value = value[:max_length]
+
+        # For unique strings, handle collisions
+        if column_schema.is_unique:
+            attempts = 0
+            while value in unique_values[column_schema.name]:
+                attempts += 1
+                if attempts > 1000:
+                    # Fallback to appending unique integer
+                    value = f"{value}_{next_unique_int.get(column_schema.name, 0)}"
+                    next_unique_int[column_schema.name] = next_unique_int.get(column_schema.name, 0) + 1
+                    break
+                value = faker.word() if not column_schema.faker_rule else str(target() if callable(target) else target)
+                if len(value) > max_length:
+                    value = value[:max_length]
+
+            unique_values[column_schema.name].add(value)
+
+        return value
+
+    else:
+        raise GenerationError(f"Unsupported data type '{data_type}' for column '{column_schema.name}'.")
+
+
 class ExperimentGenerator:
     """Generates synthetic data for experiment schemas."""
 
-    def __init__(self, batch_size: int = 10_000, faker_locale: str = "en_US") -> None:
+    def __init__(
+        self,
+        batch_size: int = 10_000,
+        faker_locale: str = "en_US",
+        max_workers: int | None = None,
+    ) -> None:
         self.batch_size = batch_size
         self.faker_locale = faker_locale
+        # Default to cpu_count - 1, minimum of 1
+        if max_workers is None:
+            cpu_count = multiprocessing.cpu_count()
+            max_workers = max(1, cpu_count - 1)
+        self.max_workers = max_workers
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         schema = request.schema
@@ -168,7 +421,7 @@ class ExperimentGenerator:
         generated_values: dict[str, dict[str, list[Any]]],
     ) -> tuple[list[Path], dict[str, list[Any]]]:
         """
-        Generate synthetic data for a table.
+        Generate synthetic data for a table using parallel batch generation.
 
         Args:
             generated_values: Previously generated unique values from parent tables for FK sampling
@@ -176,51 +429,79 @@ class ExperimentGenerator:
         Returns:
             Tuple of (parquet files, unique column values for this table)
         """
-        files: list[Path] = []
-        unique_values: dict[str, set[Any]] = defaultdict(set)
+        # Calculate number of batches
+        num_batches = (target_rows + self.batch_size - 1) // self.batch_size
+
+        # Pre-calculate unique column offsets for each batch
+        # This ensures deterministic unique value generation across parallel workers
+        batch_unique_offsets: list[dict[str, int]] = []
         next_unique_int: dict[str, int] = defaultdict(int)
 
-        # Track unique column values for FK referencing by child tables
+        # Initialize unique numeric columns
+        # - INT/FLOAT: start at 1 for positive IDs (1, 2, 3, ...)
+        # - DATE: start at 0 to include full date range (start_date + 0, start_date + 1, ...)
+        for column_schema in table_schema.columns:
+            if column_schema.is_unique:
+                if column_schema.data_type in (DataType.INT, DataType.FLOAT):
+                    next_unique_int[column_schema.name] = 1
+                elif column_schema.data_type == DataType.DATE:
+                    next_unique_int[column_schema.name] = 0
+
+        for batch_idx in range(num_batches):
+            batch_offsets = {}
+            for column_schema in table_schema.columns:
+                if column_schema.is_unique and column_schema.data_type in (DataType.INT, DataType.FLOAT, DataType.DATE):
+                    # Each batch gets a unique range of values
+                    batch_offsets[column_schema.name] = next_unique_int[column_schema.name]
+                    next_unique_int[column_schema.name] += self.batch_size
+            batch_unique_offsets.append(batch_offsets)
+
+        # Create tasks for parallel batch generation
+        tasks: list[BatchGenerationTask] = []
+        base_seed = rng.randint(0, 10**9)
+
+        for batch_idx in range(num_batches):
+            rows_in_batch = min(self.batch_size, target_rows - batch_idx * self.batch_size)
+            output_path = output_dir / f"batch-{batch_idx:05d}.parquet"
+
+            # Each batch gets a deterministic but different seed
+            batch_seed = base_seed + batch_idx
+
+            task = BatchGenerationTask(
+                table_schema=table_schema,
+                batch_index=batch_idx,
+                batch_size=rows_in_batch,
+                output_path=output_path,
+                seed=batch_seed,
+                faker_locale=self.faker_locale,
+                generated_values=generated_values,
+                unique_int_offsets=batch_unique_offsets[batch_idx],
+            )
+            tasks.append(task)
+
+        # Use multiprocessing Pool to generate batches in parallel
+        # For single-worker mode or small datasets, use sequential processing
+        if self.max_workers == 1 or num_batches == 1:
+            results = [_generate_batch_worker(task) for task in tasks]
+        else:
+            with multiprocessing.Pool(processes=self.max_workers) as pool:
+                results = pool.map(_generate_batch_worker, tasks)
+
+        # Aggregate results
+        files: list[Path] = []
         unique_column_values: dict[str, list[Any]] = {}
 
-        # Initialize surrogate key columns (_row_id) to start at 1 instead of 0
-        for column_schema in table_schema.columns:
-            if column_schema.name == "_row_id" and column_schema.is_unique:
-                next_unique_int[column_schema.name] = 1
+        # Sort results by batch_index to maintain order
+        results_sorted = sorted(results, key=lambda r: r.batch_index)
 
-        rows_remaining = target_rows
-        batch_index = 0
-        while rows_remaining > 0:
-            batch_size = min(self.batch_size, rows_remaining)
-            rows_remaining -= batch_size
-            records: list[dict[str, Any]] = []
-            for _ in range(batch_size):
-                row: dict[str, Any] = {}
-                for column_schema in table_schema.columns:
-                    value = self._generate_value(
-                        column_schema=column_schema,
-                        table_schema=table_schema,
-                        rng=rng,
-                        faker=faker,
-                        unique_values=unique_values,
-                        next_unique_int=next_unique_int,
-                        generated_values=generated_values,
-                    )
-                    row[column_schema.name] = value
+        for result in results_sorted:
+            files.append(result.output_path)
 
-                    # Track unique column values for FK referencing
-                    if column_schema.is_unique and value is not None:
-                        if column_schema.name not in unique_column_values:
-                            unique_column_values[column_schema.name] = []
-                        unique_column_values[column_schema.name].append(value)
-
-                records.append(row)
-
-            table = pa.Table.from_pylist(records)
-            file_path = output_dir / f"batch-{batch_index:05d}.parquet"
-            pq.write_table(table, file_path, compression="snappy")
-            files.append(file_path)
-            batch_index += 1
+            # Merge unique column values
+            for col_name, values in result.unique_column_values.items():
+                if col_name not in unique_column_values:
+                    unique_column_values[col_name] = []
+                unique_column_values[col_name].extend(values)
 
         return files, unique_column_values
 
@@ -489,5 +770,7 @@ __all__ = [
     "GenerationRequest",
     "GenerationResult",
     "TableGenerationResult",
+    "BatchGenerationTask",
+    "BatchGenerationResult",
     "GenerationError",
 ]

@@ -133,10 +133,14 @@ class ExperimentPersistence:
         self,
         connection_string: str | None = None,
         warehouse_url: str | None = None,
+        load_chunk_size: int = 10_000,
     ) -> None:
         # Metadata database (SQLite) - stores experiment definitions and tracking
         self.connection_string = connection_string or get_target_db_url()
         self.engine: Engine = create_engine(self.connection_string, future=True)
+
+        # Chunk size for streaming data loads (rows per batch)
+        self.load_chunk_size = load_chunk_size
 
         # Initialize warehouse engines for each supported warehouse type
         # These will be used based on per-experiment warehouse selection
@@ -898,24 +902,32 @@ class ExperimentPersistence:
 
             for file_path in parquet_files:
                 try:
-                    parquet_table = pq.read_table(file_path)
+                    # Use streaming Parquet reader to reduce memory footprint
+                    parquet_file = pq.ParquetFile(file_path)
                 except Exception as exc:  # pragma: no cover - defensive
                     raise DataLoadError(
-                        f"Failed to read Parquet file '{file_path}': {exc}"
+                        f"Failed to open Parquet file '{file_path}': {exc}"
                     ) from exc
 
-                if parquet_table.num_rows == 0:
-                    continue
-
-                records = parquet_table.to_pylist()
+                # Stream data in chunks to keep memory usage bounded
                 try:
-                    warehouse_conn.execute(target_table.insert(), records)
-                except SQLAlchemyError as exc:
-                    raise DataLoadError(
-                        f"Failed to load Parquet file '{file_path}' into '{physical_table}': {exc}"
-                    ) from exc
+                    for batch in parquet_file.iter_batches(batch_size=self.load_chunk_size):
+                        if batch.num_rows == 0:
+                            continue
 
-                total_rows += parquet_table.num_rows
+                        records = batch.to_pylist()
+                        try:
+                            warehouse_conn.execute(target_table.insert(), records)
+                        except SQLAlchemyError as exc:
+                            raise DataLoadError(
+                                f"Failed to load batch from '{file_path}' into '{physical_table}': {exc}"
+                            ) from exc
+
+                        total_rows += batch.num_rows
+                except Exception as exc:  # pragma: no cover - defensive
+                    raise DataLoadError(
+                        f"Failed to read batches from Parquet file '{file_path}': {exc}"
+                    ) from exc
 
             return total_rows
 
@@ -1034,30 +1046,39 @@ class ExperimentPersistence:
         Load Parquet files using direct INSERT statements within an existing transaction.
 
         This is a helper method used as a fallback when COPY commands fail.
+        Uses streaming to reduce memory footprint.
         """
         target_table = Table(physical_table, MetaData(), autoload_with=warehouse_engine)
 
         total_rows = 0
         for file_path in parquet_files:
             try:
-                parquet_table = pq.read_table(file_path)
+                # Use streaming Parquet reader to reduce memory footprint
+                parquet_file = pq.ParquetFile(file_path)
             except Exception as exc:  # pragma: no cover - defensive
                 raise DataLoadError(
-                    f"Failed to read Parquet file '{file_path}': {exc}"
+                    f"Failed to open Parquet file '{file_path}': {exc}"
                 ) from exc
 
-            if parquet_table.num_rows == 0:
-                continue
-
-            records = parquet_table.to_pylist()
+            # Stream data in chunks to keep memory usage bounded
             try:
-                warehouse_conn.execute(target_table.insert(), records)
-            except SQLAlchemyError as exc:
-                raise DataLoadError(
-                    f"Failed to load Parquet file '{file_path}' into '{physical_table}': {exc}"
-                ) from exc
+                for batch in parquet_file.iter_batches(batch_size=self.load_chunk_size):
+                    if batch.num_rows == 0:
+                        continue
 
-            total_rows += parquet_table.num_rows
+                    records = batch.to_pylist()
+                    try:
+                        warehouse_conn.execute(target_table.insert(), records)
+                    except SQLAlchemyError as exc:
+                        raise DataLoadError(
+                            f"Failed to load batch from '{file_path}' into '{physical_table}': {exc}"
+                        ) from exc
+
+                    total_rows += batch.num_rows
+            except Exception as exc:  # pragma: no cover - defensive
+                raise DataLoadError(
+                    f"Failed to read batches from Parquet file '{file_path}': {exc}"
+                ) from exc
 
         return total_rows
 
@@ -1086,24 +1107,32 @@ class ExperimentPersistence:
             total_rows = 0
             for file_path in parquet_files:
                 try:
-                    parquet_table = pq.read_table(file_path)
+                    # Use streaming Parquet reader to reduce memory footprint
+                    parquet_file = pq.ParquetFile(file_path)
                 except Exception as exc:  # pragma: no cover - defensive
                     raise DataLoadError(
-                        f"Failed to read Parquet file '{file_path}': {exc}"
+                        f"Failed to open Parquet file '{file_path}': {exc}"
                     ) from exc
 
-                if parquet_table.num_rows == 0:
-                    continue
-
-                records = parquet_table.to_pylist()
+                # Stream data in chunks to keep memory usage bounded
                 try:
-                    warehouse_conn.execute(target_table.insert(), records)
-                except SQLAlchemyError as exc:
-                    raise DataLoadError(
-                        f"Failed to load Parquet file '{file_path}' into '{physical_table}': {exc}"
-                    ) from exc
+                    for batch in parquet_file.iter_batches(batch_size=self.load_chunk_size):
+                        if batch.num_rows == 0:
+                            continue
 
-                total_rows += parquet_table.num_rows
+                        records = batch.to_pylist()
+                        try:
+                            warehouse_conn.execute(target_table.insert(), records)
+                        except SQLAlchemyError as exc:
+                            raise DataLoadError(
+                                f"Failed to load batch from '{file_path}' into '{physical_table}': {exc}"
+                            ) from exc
+
+                        total_rows += batch.num_rows
+                except Exception as exc:  # pragma: no cover - defensive
+                    raise DataLoadError(
+                        f"Failed to read batches from Parquet file '{file_path}': {exc}"
+                    ) from exc
 
             return total_rows
 
