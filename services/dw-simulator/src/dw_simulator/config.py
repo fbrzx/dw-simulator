@@ -50,6 +50,11 @@ DEFAULT_REDSHIFT_URL = None  # Will fall back to TARGET_DB_URL if not set
 DEFAULT_SNOWFLAKE_URL = None  # Will fall back to TARGET_DB_URL if not set
 DEFAULT_AWS_ENDPOINT_URL = "http://local-s3-staging:4566"
 
+# Performance tuning defaults (US 6.3)
+DEFAULT_GENERATION_BATCH_SIZE = 10_000  # Rows per batch during generation
+DEFAULT_LOAD_CHUNK_SIZE = 10_000  # Rows per chunk during loading
+DEFAULT_MAX_WORKERS = None  # None = cpu_count - 1
+
 
 def get_data_root() -> Path:
     """Return the resolved data directory for both SQLite and Parquet output."""
@@ -101,6 +106,60 @@ def get_aws_endpoint_url() -> str | None:
     return os.environ.get("AWS_ENDPOINT_URL", DEFAULT_AWS_ENDPOINT_URL)
 
 
+def get_generation_batch_size() -> int:
+    """
+    Get the batch size for data generation (rows per Parquet batch).
+
+    Can be tuned via DW_SIMULATOR_GENERATION_BATCH_SIZE environment variable.
+    Higher values use more memory but may be faster. Lower values use less memory.
+
+    Recommended range: 1,000 - 100,000 rows
+    """
+    value = os.environ.get("DW_SIMULATOR_GENERATION_BATCH_SIZE")
+    if value:
+        try:
+            return max(1000, min(100_000, int(value)))  # Clamp to safe range
+        except ValueError:
+            pass
+    return DEFAULT_GENERATION_BATCH_SIZE
+
+
+def get_load_chunk_size() -> int:
+    """
+    Get the chunk size for data loading (rows per INSERT batch).
+
+    Can be tuned via DW_SIMULATOR_LOAD_CHUNK_SIZE environment variable.
+    Higher values use more memory but may be faster. Lower values use less memory.
+
+    Recommended range: 1,000 - 100,000 rows
+    """
+    value = os.environ.get("DW_SIMULATOR_LOAD_CHUNK_SIZE")
+    if value:
+        try:
+            return max(1000, min(100_000, int(value)))  # Clamp to safe range
+        except ValueError:
+            pass
+    return DEFAULT_LOAD_CHUNK_SIZE
+
+
+def get_max_workers() -> int | None:
+    """
+    Get the maximum number of worker processes for parallel generation.
+
+    Can be tuned via DW_SIMULATOR_MAX_WORKERS environment variable.
+    None means use cpu_count - 1 (automatic).
+
+    Recommended: Leave as None for automatic tuning, or set to 1-16 for manual control.
+    """
+    value = os.environ.get("DW_SIMULATOR_MAX_WORKERS")
+    if value:
+        try:
+            return max(1, min(32, int(value)))  # Clamp to reasonable range
+        except ValueError:
+            pass
+    return DEFAULT_MAX_WORKERS
+
+
 def _ensure_sqlite_parent(url: str) -> None:
     prefix = "sqlite:///"
     if not url.startswith(prefix):
@@ -121,10 +180,16 @@ __all__ = [
     "DEFAULT_REDSHIFT_URL",
     "DEFAULT_SNOWFLAKE_URL",
     "DEFAULT_AWS_ENDPOINT_URL",
+    "DEFAULT_GENERATION_BATCH_SIZE",
+    "DEFAULT_LOAD_CHUNK_SIZE",
+    "DEFAULT_MAX_WORKERS",
     "get_data_root",
     "get_target_db_url",
     "get_stage_bucket",
     "get_redshift_url",
     "get_snowflake_url",
     "get_aws_endpoint_url",
+    "get_generation_batch_size",
+    "get_load_chunk_size",
+    "get_max_workers",
 ]
