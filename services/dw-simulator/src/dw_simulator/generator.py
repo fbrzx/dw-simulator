@@ -437,9 +437,10 @@ class ExperimentGenerator:
         batch_unique_offsets: list[dict[str, int]] = []
         next_unique_int: dict[str, int] = defaultdict(int)
 
-        # Initialize surrogate key columns (_row_id) to start at 1 instead of 0
+        # Initialize all unique numeric columns to start at 1 instead of 0
+        # This ensures IDs are always positive (1, 2, 3, ...) for better FK compatibility
         for column_schema in table_schema.columns:
-            if column_schema.name == "_row_id" and column_schema.is_unique:
+            if column_schema.is_unique and column_schema.data_type in (DataType.INT, DataType.FLOAT, DataType.DATE):
                 next_unique_int[column_schema.name] = 1
 
         for batch_idx in range(num_batches):
