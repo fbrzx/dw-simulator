@@ -223,6 +223,42 @@ def create_app(service: ExperimentService | None = None) -> FastAPI:
             "seed": run.seed,
         }
 
+    @app.get("/api/experiments/{name}/lineage")
+    def get_lineage(name: str) -> dict[str, Any]:
+        """Get lineage graph data for an experiment (table relationships, FK dependencies)."""
+        from .lineage import export_lineage_dot
+        try:
+            graph = _service().persistence.build_lineage_graph(name)
+            return {
+                "experiment_name": graph.experiment_name,
+                "graph": graph.to_dict(),
+            }
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=[f"Failed to build lineage graph for experiment '{name}': {str(exc)}"],
+            )
+
+    @app.get("/api/experiments/{name}/lineage/export")
+    def export_lineage(name: str) -> Response:
+        """Export lineage graph as GraphViz DOT file."""
+        from .lineage import export_lineage_dot
+        try:
+            graph = _service().persistence.build_lineage_graph(name)
+            dot_content = export_lineage_dot(graph, name)
+            return Response(
+                content=dot_content,
+                media_type="text/vnd.graphviz",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{name}_lineage.dot"'
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=[f"Failed to export lineage for experiment '{name}': {str(exc)}"],
+            )
+
     @app.post("/api/experiments/import-sql", status_code=status.HTTP_201_CREATED)
     def import_sql_endpoint(payload: SqlImportPayload) -> dict[str, Any]:
         result = _service().create_experiment_from_sql(

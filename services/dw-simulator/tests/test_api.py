@@ -365,3 +365,145 @@ def test_load_experiment_no_completed_runs(client: TestClient) -> None:
     body = response.json()
     assert "detail" in body
     assert any("no completed generation runs" in str(err).lower() for err in body["detail"])
+
+
+# Lineage API tests
+
+
+def schema_with_fks(name: str = "LineageApiTest") -> dict:
+    """Sample schema with foreign key relationships for lineage testing."""
+    return {
+        "name": name,
+        "tables": [
+            {
+                "name": "customers",
+                "target_rows": 10,
+                "columns": [
+                    {"name": "customer_id", "data_type": "INT", "is_unique": True},
+                    {"name": "email", "data_type": "VARCHAR", "varchar_length": 255},
+                ],
+            },
+            {
+                "name": "orders",
+                "target_rows": 50,
+                "columns": [
+                    {"name": "order_id", "data_type": "INT", "is_unique": True},
+                    {
+                        "name": "customer_id",
+                        "data_type": "INT",
+                        "foreign_key": {
+                            "references_table": "customers",
+                            "references_column": "customer_id",
+                        },
+                    },
+                    {"name": "order_total", "data_type": "FLOAT"},
+                ],
+            },
+        ],
+    }
+
+
+def test_get_lineage_graph(client: TestClient) -> None:
+    """Test GET /api/experiments/{name}/lineage returns lineage graph data."""
+    # Create experiment with FK relationships
+    create_response = client.post("/api/experiments", json=schema_with_fks())
+    assert create_response.status_code == 201
+
+    # Get lineage
+    response = client.get("/api/experiments/LineageApiTest/lineage")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["experiment_name"] == "LineageApiTest"
+    assert "graph" in body
+
+    graph = body["graph"]
+    assert "nodes" in graph
+    assert "edges" in graph
+
+    # Should have 2 nodes (customers, orders)
+    assert len(graph["nodes"]) == 2
+    node_names = [n["name"] for n in graph["nodes"]]
+    assert "customers" in node_names
+    assert "orders" in node_names
+
+    # Should have 1 edge (orders -> customers)
+    assert len(graph["edges"]) == 1
+    edge = graph["edges"][0]
+    assert edge["source"] == "orders"
+    assert edge["target"] == "customers"
+    assert edge["type"] == "foreign_key"
+    assert edge["metadata"]["source_column"] == "customer_id"
+    assert edge["metadata"]["target_column"] == "customer_id"
+
+
+def test_get_lineage_graph_not_found(client: TestClient) -> None:
+    """Test GET /api/experiments/{name}/lineage returns 404 for non-existent experiment."""
+    response = client.get("/api/experiments/NonExistent/lineage")
+    assert response.status_code == 404
+    body = response.json()
+    assert "detail" in body
+
+
+def test_export_lineage_dot(client: TestClient) -> None:
+    """Test GET /api/experiments/{name}/lineage/export returns DOT file."""
+    # Create experiment with FK relationships
+    create_response = client.post("/api/experiments", json=schema_with_fks("ExportTest"))
+    assert create_response.status_code == 201
+
+    # Export lineage as DOT
+    response = client.get("/api/experiments/ExportTest/lineage/export")
+    assert response.status_code == 200
+
+    # Check response headers
+    assert response.headers["content-type"] == "text/vnd.graphviz; charset=utf-8"
+    assert "attachment" in response.headers["content-disposition"]
+    assert "ExportTest_lineage.dot" in response.headers["content-disposition"]
+
+    # Check DOT content
+    dot_content = response.text
+    assert dot_content.startswith("digraph")
+    assert "customers" in dot_content
+    assert "orders" in dot_content
+    assert "orders -> customers" in dot_content
+    assert "customer_id" in dot_content
+
+
+def test_export_lineage_empty_graph(client: TestClient) -> None:
+    """Test exporting lineage for experiment with no FK relationships."""
+    # Create experiment without FKs
+    create_response = client.post("/api/experiments", json=sample_schema("EmptyLineage"))
+    assert create_response.status_code == 201
+
+    # Export lineage
+    response = client.get("/api/experiments/EmptyLineage/lineage/export")
+    assert response.status_code == 200
+
+    dot_content = response.text
+    assert dot_content.startswith("digraph")
+    assert "customers" in dot_content
+    assert "->" not in dot_content  # No edges
+
+
+def test_lineage_persists_across_reset(client: TestClient) -> None:
+    """Test that lineage data persists when experiment is reset."""
+    # Create experiment with FKs
+    client.post("/api/experiments", json=schema_with_fks("PersistTest"))
+
+    # Get initial lineage
+    response1 = client.get("/api/experiments/PersistTest/lineage")
+    assert response1.status_code == 200
+    graph1 = response1.json()["graph"]
+    assert len(graph1["nodes"]) == 2
+    assert len(graph1["edges"]) == 1
+
+    # Reset experiment
+    reset_response = client.post("/api/experiments/PersistTest/reset")
+    assert reset_response.status_code == 200
+
+    # Lineage should still be intact
+    response2 = client.get("/api/experiments/PersistTest/lineage")
+    assert response2.status_code == 200
+    graph2 = response2.json()["graph"]
+    assert len(graph2["nodes"]) == 2
+    assert len(graph2["edges"]) == 1
