@@ -1088,3 +1088,298 @@ def test_generator_override_to_zero_rows(tmp_path: Path) -> None:
     # Verify table_a was skipped
     table_a_dir = result.output_dir / "table_a"
     assert not table_a_dir.exists()
+
+
+# US 6.3 Multiprocessing Performance Optimization Tests
+
+
+def test_multiprocessing_parallel_generation_produces_correct_results(tmp_path: Path) -> None:
+    """Test that parallel batch generation produces correct number of rows and valid data."""
+    schema = ExperimentSchema(
+        name="parallel_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="users",
+                target_rows=1000,  # Multiple batches to test parallelism
+                columns=[
+                    ColumnSchema(name="user_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="email", data_type="VARCHAR", faker_rule="email", varchar_length=100),
+                    ColumnSchema(name="age", data_type="INT", min_value=18, max_value=100),
+                ],
+            )
+        ],
+    )
+
+    # Generate with multiple workers (default: cpu_count - 1)
+    generator = ExperimentGenerator(batch_size=100, max_workers=4)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=42),
+    )
+
+    # Verify correct number of rows
+    assert result.tables[0].row_count == 1000
+
+    # Verify all batches were created
+    assert len(result.tables[0].files) == 10  # 1000 rows / 100 batch_size = 10 batches
+
+    # Read all generated data and verify uniqueness
+    all_user_ids = []
+    all_emails = []
+    all_ages = []
+
+    for file_path in result.tables[0].files:
+        table = pq.read_table(file_path)
+        all_user_ids.extend(table.column("user_id").to_pylist())
+        all_emails.extend(table.column("email").to_pylist())
+        all_ages.extend(table.column("age").to_pylist())
+
+    # Verify total rows
+    assert len(all_user_ids) == 1000
+
+    # Verify unique column has no duplicates
+    assert len(set(all_user_ids)) == 1000, "user_id should be unique across all batches"
+
+    # Verify age constraints are respected
+    assert all(18 <= age <= 100 for age in all_ages)
+
+    # Verify emails contain @ symbol
+    assert all("@" in email for email in all_emails)
+
+
+def test_multiprocessing_deterministic_seeding(tmp_path: Path) -> None:
+    """Test that parallel generation produces identical results with the same seed."""
+    schema = ExperimentSchema(
+        name="deterministic_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="products",
+                target_rows=500,
+                columns=[
+                    ColumnSchema(name="product_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", faker_rule="company", varchar_length=100),
+                    ColumnSchema(name="price", data_type="FLOAT", min_value=1.0, max_value=1000.0),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100, max_workers=4)
+
+    # Generate twice with the same seed
+    result1 = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "run1", seed=12345),
+    )
+    result2 = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "run2", seed=12345),
+    )
+
+    # Read data from both runs
+    ids1 = []
+    names1 = []
+    prices1 = []
+
+    ids2 = []
+    names2 = []
+    prices2 = []
+
+    for file_path in result1.tables[0].files:
+        table = pq.read_table(file_path)
+        ids1.extend(table.column("product_id").to_pylist())
+        names1.extend(table.column("name").to_pylist())
+        prices1.extend(table.column("price").to_pylist())
+
+    for file_path in result2.tables[0].files:
+        table = pq.read_table(file_path)
+        ids2.extend(table.column("product_id").to_pylist())
+        names2.extend(table.column("name").to_pylist())
+        prices2.extend(table.column("price").to_pylist())
+
+    # Verify identical results
+    assert ids1 == ids2, "Parallel generation should be deterministic with same seed"
+    assert names1 == names2, "Faker values should be deterministic with same seed"
+    assert prices1 == prices2, "Random values should be deterministic with same seed"
+
+
+def test_multiprocessing_single_worker_vs_multi_worker_equivalence(tmp_path: Path) -> None:
+    """Test that single-worker and multi-worker modes produce equivalent results with same seed."""
+    schema = ExperimentSchema(
+        name="equivalence_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="transactions",
+                target_rows=300,
+                columns=[
+                    ColumnSchema(name="txn_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="amount", data_type="FLOAT", min_value=0.01, max_value=10000.0),
+                    ColumnSchema(name="status", data_type="VARCHAR", varchar_length=20),
+                ],
+            )
+        ],
+    )
+
+    seed = 99999
+
+    # Generate with single worker
+    generator_single = ExperimentGenerator(batch_size=100, max_workers=1)
+    result_single = generator_single.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "single", seed=seed),
+    )
+
+    # Generate with multiple workers
+    generator_multi = ExperimentGenerator(batch_size=100, max_workers=4)
+    result_multi = generator_multi.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "multi", seed=seed),
+    )
+
+    # Read data from both runs
+    ids_single = []
+    amounts_single = []
+
+    ids_multi = []
+    amounts_multi = []
+
+    for file_path in result_single.tables[0].files:
+        table = pq.read_table(file_path)
+        ids_single.extend(table.column("txn_id").to_pylist())
+        amounts_single.extend(table.column("amount").to_pylist())
+
+    for file_path in result_multi.tables[0].files:
+        table = pq.read_table(file_path)
+        ids_multi.extend(table.column("txn_id").to_pylist())
+        amounts_multi.extend(table.column("amount").to_pylist())
+
+    # Verify both produce same number of rows
+    assert len(ids_single) == len(ids_multi) == 300
+
+    # Verify unique IDs are the same (order matters for determinism)
+    assert ids_single == ids_multi, "Single and multi-worker should produce identical unique values"
+
+    # Verify amounts are the same
+    assert amounts_single == amounts_multi, "Single and multi-worker should produce identical random values"
+
+
+def test_multiprocessing_unique_values_across_batches(tmp_path: Path) -> None:
+    """Test that unique constraints are respected across parallel batches."""
+    schema = ExperimentSchema(
+        name="unique_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="large_table",
+                target_rows=2000,  # Many batches to stress-test uniqueness
+                columns=[
+                    ColumnSchema(name="id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="unique_float", data_type="FLOAT", is_unique=True),
+                    ColumnSchema(name="value", data_type="INT", min_value=0, max_value=100),
+                ],
+            )
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100, max_workers=4)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=777),
+    )
+
+    # Read all data
+    all_ids = []
+    all_unique_floats = []
+
+    for file_path in result.tables[0].files:
+        table = pq.read_table(file_path)
+        all_ids.extend(table.column("id").to_pylist())
+        all_unique_floats.extend(table.column("unique_float").to_pylist())
+
+    # Verify uniqueness
+    assert len(all_ids) == 2000
+    assert len(set(all_ids)) == 2000, "INT unique column should have no duplicates across parallel batches"
+
+    assert len(all_unique_floats) == 2000
+    assert len(set(all_unique_floats)) == 2000, "FLOAT unique column should have no duplicates across parallel batches"
+
+
+def test_multiprocessing_with_foreign_keys(tmp_path: Path) -> None:
+    """Test that foreign key relationships work correctly with parallel generation."""
+    from dw_simulator.schema import ForeignKeyConfig
+
+    schema = ExperimentSchema(
+        name="fk_parallel_test",
+        description=None,
+        tables=[
+            TableSchema(
+                name="customers",
+                target_rows=100,
+                columns=[
+                    ColumnSchema(name="customer_id", data_type="INT", is_unique=True),
+                    ColumnSchema(name="name", data_type="VARCHAR", faker_rule="name", varchar_length=50),
+                ],
+            ),
+            TableSchema(
+                name="orders",
+                target_rows=1000,  # Many orders per customer
+                columns=[
+                    ColumnSchema(name="order_id", data_type="INT", is_unique=True),
+                    ColumnSchema(
+                        name="customer_id",
+                        data_type="INT",
+                        required=True,
+                        foreign_key=ForeignKeyConfig(
+                            references_table="customers",
+                            references_column="customer_id",
+                        ),
+                    ),
+                    ColumnSchema(name="amount", data_type="FLOAT", min_value=1.0, max_value=1000.0),
+                ],
+            ),
+        ],
+    )
+
+    generator = ExperimentGenerator(batch_size=100, max_workers=4)
+    result = generator.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=555),
+    )
+
+    # Read customer data
+    customer_ids = set()
+    for file_path in result.tables[0].files:
+        table = pq.read_table(file_path)
+        customer_ids.update(table.column("customer_id").to_pylist())
+
+    # Read order data
+    order_customer_ids = []
+    for file_path in result.tables[1].files:
+        table = pq.read_table(file_path)
+        order_customer_ids.extend(table.column("customer_id").to_pylist())
+
+    # Verify FK relationships
+    assert len(customer_ids) == 100
+    assert len(order_customer_ids) == 1000
+
+    # All FK values must reference valid parent table values
+    for fk_value in order_customer_ids:
+        assert fk_value in customer_ids, f"FK value {fk_value} not found in parent table (parallel generation)"
+
+
+def test_multiprocessing_max_workers_configuration(tmp_path: Path) -> None:
+    """Test that max_workers parameter is respected and defaults work correctly."""
+    import multiprocessing as mp
+
+    schema = sample_schema()
+
+    # Test default (should be cpu_count - 1, minimum 1)
+    generator_default = ExperimentGenerator(batch_size=10)
+    expected_default = max(1, mp.cpu_count() - 1)
+    assert generator_default.max_workers == expected_default
+
+    # Test explicit value
+    generator_explicit = ExperimentGenerator(batch_size=10, max_workers=2)
+    assert generator_explicit.max_workers == 2
+
+    # Test that generation still works with custom worker count
+    result = generator_explicit.generate(
+        GenerationRequest(schema=schema, output_root=tmp_path / "out", seed=123),
+    )
+    assert result.tables[0].row_count == 50
