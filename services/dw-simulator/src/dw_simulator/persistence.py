@@ -40,6 +40,7 @@ from .config import get_target_db_url, get_redshift_url, get_snowflake_url
 from .schema import ColumnSchema, DataType, ExperimentSchema, WarehouseType
 from .s3_client import upload_parquet_files_to_s3, S3UploadError
 from .query_rewriter import rewrite_query_for_experiment, QueryRewriteError
+from .lineage import LineageRelationship, LineageGraph, LineageNode, LineageEdge
 
 import pyarrow.parquet as pq
 
@@ -211,6 +212,25 @@ class ExperimentPersistence:
             Column("error_message", Text, nullable=True),
             Column("seed", Integer, nullable=True),
         )
+        self._lineage_relationships = Table(
+            "lineage_relationships",
+            self._metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("experiment_name", String(255), nullable=False),
+            Column("source_table", String(255), nullable=False),
+            Column("source_column", String(255), nullable=False),
+            Column("target_table", String(255), nullable=False),
+            Column("target_column", String(255), nullable=False),
+            Column("relationship_type", String(32), nullable=False),  # "foreign_key", "derived", etc.
+            UniqueConstraint(
+                "experiment_name",
+                "source_table",
+                "source_column",
+                "target_table",
+                "target_column",
+                name="uq_lineage_relationship"
+            ),
+        )
         self._metadata.create_all(self.engine)
 
     # Warehouse engine routing ---------------------------------------------------
@@ -305,6 +325,18 @@ class ExperimentPersistence:
                             target_rows=table_schema.target_rows,
                         )
                     )
+                    # Store lineage relationships (FK dependencies)
+                    for col_name, fk_config in table_schema.foreign_keys:
+                        conn.execute(
+                            self._lineage_relationships.insert().values(
+                                experiment_name=schema.name,
+                                source_table=table_schema.name,
+                                source_column=col_name,
+                                target_table=fk_config.references_table,
+                                target_column=fk_config.references_column,
+                                relationship_type="foreign_key",
+                            )
+                        )
 
             # Then, create physical tables in the warehouse database (separate transaction)
             try:
@@ -447,6 +479,11 @@ class ExperimentPersistence:
                 metadata_conn.execute(
                     self._generation_runs.delete().where(
                         self._generation_runs.c.experiment_name == name
+                    )
+                )
+                metadata_conn.execute(
+                    self._lineage_relationships.delete().where(
+                        self._lineage_relationships.c.experiment_name == name
                     )
                 )
                 metadata_conn.execute(self._experiments.delete().where(self._experiments.c.name == name))
@@ -1260,6 +1297,128 @@ class ExperimentPersistence:
             Table(table_name, metadata, *columns)
             # Create table in the experiment's target warehouse database
             metadata.create_all(warehouse_engine)
+
+    # Lineage tracking methods --------------------------------------------------
+
+    def get_lineage_relationships(self, experiment_name: str) -> list[LineageRelationship]:
+        """Get all lineage relationships for an experiment."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    self._lineage_relationships.c.id,
+                    self._lineage_relationships.c.experiment_name,
+                    self._lineage_relationships.c.source_table,
+                    self._lineage_relationships.c.source_column,
+                    self._lineage_relationships.c.target_table,
+                    self._lineage_relationships.c.target_column,
+                    self._lineage_relationships.c.relationship_type,
+                ).where(self._lineage_relationships.c.experiment_name == experiment_name)
+            ).all()
+
+        return [
+            LineageRelationship(
+                id=row.id,
+                experiment_name=row.experiment_name,
+                source_table=row.source_table,
+                source_column=row.source_column,
+                target_table=row.target_table,
+                target_column=row.target_column,
+                relationship_type=row.relationship_type,
+            )
+            for row in rows
+        ]
+
+    def build_lineage_graph(self, experiment_name: str) -> LineageGraph:
+        """Build an in-memory lineage graph from stored relationships."""
+        # Verify experiment exists
+        with self.engine.connect() as conn:
+            if not self._experiment_exists(conn, experiment_name):
+                raise ExperimentNotFoundError(f"Experiment '{experiment_name}' does not exist.")
+
+        relationships = self.get_lineage_relationships(experiment_name)
+
+        # Build node map (unique table names)
+        nodes_map: dict[str, LineageNode] = {}
+
+        # Get table metadata from experiment_tables
+        with self.engine.connect() as conn:
+            table_rows = conn.execute(
+                select(
+                    self._experiment_tables.c.table_name,
+                    self._experiment_tables.c.target_rows,
+                ).where(self._experiment_tables.c.experiment_name == experiment_name)
+            ).all()
+
+        # Create nodes for all tables
+        for row in table_rows:
+            node = LineageNode(
+                name=row.table_name,
+                node_type="table",
+                metadata={
+                    "target_rows": row.target_rows,
+                    "generation_run_ids": [],  # Will be populated when we track generation provenance
+                }
+            )
+            nodes_map[row.table_name] = node
+
+        # Build edges from relationships
+        edges = []
+        for rel in relationships:
+            source_node = nodes_map.get(rel.source_table)
+            target_node = nodes_map.get(rel.target_table)
+
+            if source_node and target_node:
+                edge = LineageEdge(
+                    source=source_node,
+                    target=target_node,
+                    edge_type=rel.relationship_type,
+                    metadata={
+                        "source_column": rel.source_column,
+                        "target_column": rel.target_column,
+                    }
+                )
+                edges.append(edge)
+
+        return LineageGraph(
+            experiment_name=experiment_name,
+            nodes=list(nodes_map.values()),
+            edges=edges,
+        )
+
+    def get_generation_runs(self, experiment_name: str) -> list[GenerationRunMetadata]:
+        """Get all generation runs for an experiment."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    self._generation_runs.c.id,
+                    self._generation_runs.c.experiment_name,
+                    self._generation_runs.c.status,
+                    self._generation_runs.c.started_at,
+                    self._generation_runs.c.completed_at,
+                    self._generation_runs.c.row_counts,
+                    self._generation_runs.c.output_path,
+                    self._generation_runs.c.error_message,
+                    self._generation_runs.c.seed,
+                ).where(self._generation_runs.c.experiment_name == experiment_name)
+                .order_by(self._generation_runs.c.started_at.desc())
+            ).all()
+
+        return [
+            GenerationRunMetadata(
+                id=row.id,
+                experiment_name=row.experiment_name,
+                status=GenerationStatus(row.status),
+                started_at=datetime.fromisoformat(row.started_at),
+                completed_at=datetime.fromisoformat(row.completed_at) if row.completed_at else None,
+                row_counts=row.row_counts or "{}",
+                output_path=row.output_path,
+                error_message=row.error_message,
+                seed=row.seed,
+            )
+            for row in rows
+        ]
+
+    # Private helper methods -----------------------------------------------------
 
     @staticmethod
     def _physical_table_name(experiment_name: str, table_name: str) -> str:
