@@ -437,11 +437,15 @@ class ExperimentGenerator:
         batch_unique_offsets: list[dict[str, int]] = []
         next_unique_int: dict[str, int] = defaultdict(int)
 
-        # Initialize all unique numeric columns to start at 1 instead of 0
-        # This ensures IDs are always positive (1, 2, 3, ...) for better FK compatibility
+        # Initialize unique numeric columns
+        # - INT/FLOAT: start at 1 for positive IDs (1, 2, 3, ...)
+        # - DATE: start at 0 to include full date range (start_date + 0, start_date + 1, ...)
         for column_schema in table_schema.columns:
-            if column_schema.is_unique and column_schema.data_type in (DataType.INT, DataType.FLOAT, DataType.DATE):
-                next_unique_int[column_schema.name] = 1
+            if column_schema.is_unique:
+                if column_schema.data_type in (DataType.INT, DataType.FLOAT):
+                    next_unique_int[column_schema.name] = 1
+                elif column_schema.data_type == DataType.DATE:
+                    next_unique_int[column_schema.name] = 0
 
         for batch_idx in range(num_batches):
             batch_offsets = {}
