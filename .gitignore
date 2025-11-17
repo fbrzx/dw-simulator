@@ -18,3 +18,5 @@ node_modules/
 **/node_modules/
 services/web-ui/dist/
 data/
+
+.DS_Store
